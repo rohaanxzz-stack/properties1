@@ -391,21 +391,118 @@ def inject_css(theme: str):
         text_secondary = "#64748b"
         sidebar_bg = "#ffffff"
 
+    input_bg = "#1f2330" if theme == "Dark" else "#ffffff"
+    input_text = "#f1f5f9" if theme == "Dark" else "#0f172a"
+
     st.markdown(f"""
     <style>
         .stApp {{
             background-color: {bg};
+            color: {text_primary};
         }}
         [data-testid="stSidebar"] {{
             background-color: {sidebar_bg};
             border-right: 1px solid {card_border};
         }}
+        [data-testid="stSidebar"] * {{
+            color: {text_primary} !important;
+        }}
         .block-container {{
             padding-top: 1.6rem;
             padding-bottom: 3rem;
         }}
-        h1, h2, h3, h4, h5, p, span, label, div {{
+        h1, h2, h3, h4, h5, h6, p, span, label, div, li, a {{
             color: {text_primary};
+        }}
+
+        /* --- Form widgets: text inputs, number inputs, textareas --- */
+        .stTextInput input, .stNumberInput input, .stTextArea textarea,
+        .stDateInput input {{
+            background-color: {input_bg} !important;
+            color: {input_text} !important;
+            border: 1px solid {card_border} !important;
+        }}
+        .stTextInput input::placeholder, .stTextArea textarea::placeholder {{
+            color: {text_secondary} !important;
+            opacity: 1;
+        }}
+
+        /* --- Selectbox / Multiselect (closed state) --- */
+        .stSelectbox div[data-baseweb="select"] > div,
+        .stMultiSelect div[data-baseweb="select"] > div {{
+            background-color: {input_bg} !important;
+            color: {input_text} !important;
+            border-color: {card_border} !important;
+        }}
+        .stSelectbox div[data-baseweb="select"] span,
+        .stMultiSelect div[data-baseweb="select"] span {{
+            color: {input_text} !important;
+        }}
+
+        /* --- Dropdown popover / option list (rendered in a portal) --- */
+        div[data-baseweb="popover"] {{
+            background-color: {input_bg} !important;
+        }}
+        div[data-baseweb="popover"] li,
+        div[data-baseweb="popover"] div,
+        ul[role="listbox"] li {{
+            background-color: {input_bg} !important;
+            color: {input_text} !important;
+        }}
+        ul[role="listbox"] li:hover {{
+            background-color: {PRIMARY} !important;
+            color: #ffffff !important;
+        }}
+
+        /* --- Multiselect selected tags --- */
+        .stMultiSelect span[data-baseweb="tag"] {{
+            background-color: {PRIMARY} !important;
+            color: #ffffff !important;
+        }}
+
+        /* --- Radio / checkbox labels --- */
+        .stRadio label, .stCheckbox label {{
+            color: {text_primary} !important;
+        }}
+        .stRadio label p, .stCheckbox label p {{
+            color: {text_primary} !important;
+        }}
+
+        /* --- DataFrame / table --- */
+        [data-testid="stDataFrame"] {{
+            background-color: {card_bg} !important;
+        }}
+        [data-testid="stDataFrame"] * {{
+            color: {input_text} !important;
+        }}
+
+        /* --- Metric widget --- */
+        [data-testid="stMetric"] label, [data-testid="stMetric"] div {{
+            color: {text_primary} !important;
+        }}
+
+        /* --- Tabs --- */
+        .stTabs [data-baseweb="tab"] p {{
+            color: {text_primary} !important;
+        }}
+
+        /* --- Expander --- */
+        .streamlit-expanderHeader, [data-testid="stExpander"] summary {{
+            background-color: {card_bg} !important;
+            color: {text_primary} !important;
+        }}
+        [data-testid="stExpander"] * {{
+            color: {text_primary} !important;
+        }}
+
+        /* --- Alerts (info/success/warning/error) keep their own readable palette --- */
+        [data-testid="stAlert"] p, [data-testid="stAlert"] div {{
+            color: inherit !important;
+        }}
+
+        /* --- File download buttons / general buttons --- */
+        .stButton button, .stDownloadButton button, .stFormSubmitButton button {{
+            color: {text_primary if theme == "Dark" else "#0f172a"};
         }}
         .app-header {{
             display: flex;
