@@ -1,5 +1,5 @@
 # ==============================================================================
-# PROPERTY INVESTMENT & BUSINESS PORTFOLIO MANAGEMENT DASHBOARD
+# PROPERTY INVESTMENT & BUSINESS PORTFOLIO MANAGEMENT SYSTEM
 # Single-File Production Application (app.py)
 # ==============================================================================
 
@@ -22,7 +22,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 # ==============================================================================
 
 st.set_page_config(
-    page_title="Property Investment & Business Portfolio Management Dashboard",
+    page_title="Real Estate Business Portfolio Management System",
     page_icon="🏢",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -45,7 +45,7 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Business Settings Table (No Initial Profit field)
+    # Business Settings Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS business_settings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,6 +78,7 @@ def init_db():
             total_property_cost REAL NOT NULL,
             our_ownership_pct REAL NOT NULL,
             our_investment REAL NOT NULL,
+            current_estimated_value REAL DEFAULT 0.0,
             expected_selling_price REAL NOT NULL,
             actual_selling_price REAL DEFAULT 0.0,
             our_selling_amount REAL DEFAULT 0.0,
@@ -105,7 +106,7 @@ init_db()
 # ==============================================================================
 
 def format_pkr(amount):
-    """Formats numeric values into Pakistani Rupee (PKR) standard format."""
+    """Formats numeric values into Pakistani Rupee (PKR) standard format with Lakh/Crore notation."""
     if amount is None:
         amount = 0.0
     sign = "-" if amount < 0 else ""
@@ -140,7 +141,7 @@ def get_business_settings():
 def recalculate_business_metrics():
     """
     Dynamic financial recalculation engine.
-    Applies Realized Profit rules strictly for Sold properties.
+    Computes Business Cash, Partner Net Worths, and Realized Profits strictly for Sold properties.
     """
     settings = get_business_settings()
     if not settings:
@@ -316,7 +317,6 @@ def inject_custom_css(theme="Dark"):
             font-weight: 600;
         }}
         
-        /* Streamlit Customizations */
         .stProgress > div > div > div > div {{
             background-image: linear-gradient(to right, #3182CE , #63B3ED);
         }}
@@ -338,7 +338,7 @@ if settings:
 
 if not settings:
     st.markdown("# ⚙️ Initial Business System Setup")
-    st.info("Welcome to the Property Investment & Business Portfolio Management Dashboard. Please configure your initial business metrics.")
+    st.info("Welcome to the Property Investment & Business Portfolio Management System. Please configure your initial business metrics.")
     
     with st.form("setup_form"):
         col1, col2 = st.columns(2)
@@ -390,15 +390,13 @@ elif settings:
         "Navigation",
         [
             "🏠 Dashboard",
-            "🏢 Properties",
             "➕ Add Property",
+            "🏢 Manage Properties",
             "📊 Portfolio",
-            "👤 Dealer Accounts",
-            "👥 Jaffar Account",
-            "👥 Tehseen Account",
             "📑 Reports",
             "⚙ Business Settings"
-        ]
+        ],
+        index=0
     )
 
     # ==========================================================================
@@ -419,19 +417,14 @@ elif settings:
         active_props_df = props_df[props_df["status"].isin(["Available", "Under Construction"])]
         money_invested = active_props_df["our_investment"].sum() if not active_props_df.empty else 0.0
         
-        # Current Value of Active Investments based on Expected Selling Price share
-        active_investments_val = (active_props_df["expected_selling_price"] * (active_props_df["our_ownership_pct"] / 100.0)).sum() if not active_props_df.empty else 0.0
-        
-        # Unrealized Gain/Loss = Current Value of Active Investments - Our Active Investment
-        unrealized_gain_loss = active_investments_val - money_invested
+        # Portfolio Value (Current Estimated Value share for Active Properties)
+        active_investments_val = (active_props_df["current_estimated_value"] * (active_props_df["our_ownership_pct"] / 100.0)).sum() if not active_props_df.empty else 0.0
             
         # Realized Calculations (STRICTLY SOLD PROPERTIES)
         sold_df = props_df[props_df["status"] == "Sold"]
         total_realized_profit = sold_df[sold_df["our_profit"] > 0]["our_profit"].sum() if not sold_df.empty else 0.0
         total_realized_loss = abs(sold_df[sold_df["our_profit"] < 0]["our_profit"].sum()) if not sold_df.empty else 0.0
         total_dealer_earnings = sold_df["dealer_commission"].sum() if not sold_df.empty else 0.0
-        jaffar_profit_earned = sold_df["jaffar_profit"].sum() if not sold_df.empty else 0.0
-        tehseen_profit_earned = sold_df["tehseen_profit"].sum() if not sold_df.empty else 0.0
         
         current_cash = settings["current_business_cash"]
         
@@ -440,29 +433,58 @@ elif settings:
         roi_pct = (((total_realized_profit - total_realized_loss) / money_invested) * 100) if money_invested > 0 else 0.0
         
         # ----------------------------------------------------------------------
-        # REQUIRED DASHBOARD PROFIT KPI CARDS
+        # TOP KPI CARDS
         # ----------------------------------------------------------------------
-        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k6, k7, k8, k9, k10 = st.columns(5)
+        k11, k12, k13, k14 = st.columns(4)
         
         with k1:
             st.markdown(f"""
             <div class="kpi-card">
-                <div class="kpi-title">Total Realized Profit</div>
-                <div class="kpi-value" style="color: #48BB78;">{format_pkr(total_realized_profit)}</div>
-                <div class="kpi-subtext">From Sold Properties Only</div>
+                <div class="kpi-title">Business Net Worth</div>
+                <div class="kpi-value" style="color: #9F7AEA;">{format_pkr(business_net_worth)}</div>
+                <div class="kpi-subtext">Total Portfolio Net Worth</div>
             </div>
             """, unsafe_allow_html=True)
 
         with k2:
             st.markdown(f"""
             <div class="kpi-card">
-                <div class="kpi-title">Unrealized Gain / Loss</div>
-                <div class="kpi-value" style="color: {'#38B2AC' if unrealized_gain_loss >= 0 else '#F56565'};">{format_pkr(unrealized_gain_loss)}</div>
-                <div class="kpi-subtext">Unsold Est. Market Delta</div>
+                <div class="kpi-title">Business Cash</div>
+                <div class="kpi-value" style="color: #3182CE;">{format_pkr(current_cash)}</div>
+                <div class="kpi-subtext">Liquid Available Cash</div>
             </div>
             """, unsafe_allow_html=True)
 
         with k3:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-title">Money Invested</div>
+                <div class="kpi-value" style="color: #ECC94B;">{format_pkr(money_invested)}</div>
+                <div class="kpi-subtext">Active Capital Outflow</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k4:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-title">Portfolio Value</div>
+                <div class="kpi-value" style="color: #319795;">{format_pkr(active_investments_val)}</div>
+                <div class="kpi-subtext">Current Active Market Value</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k5:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-title">Total Realized Profit</div>
+                <div class="kpi-value" style="color: #48BB78;">{format_pkr(total_realized_profit)}</div>
+                <div class="kpi-subtext">Sold Properties Only</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k6:
             st.markdown(f"""
             <div class="kpi-card">
                 <div class="kpi-title">Total Realized Loss</div>
@@ -471,7 +493,7 @@ elif settings:
             </div>
             """, unsafe_allow_html=True)
 
-        with k4:
+        with k7:
             st.markdown(f"""
             <div class="kpi-card">
                 <div class="kpi-title">Dealer Earnings</div>
@@ -480,46 +502,67 @@ elif settings:
             </div>
             """, unsafe_allow_html=True)
 
-        with k5:
+        with k8:
             st.markdown(f"""
             <div class="kpi-card">
-                <div class="kpi-title">Jaffar Profit Earned</div>
-                <div class="kpi-value" style="color: #319795;">{format_pkr(jaffar_profit_earned)}</div>
-                <div class="kpi-subtext">Realized Share</div>
+                <div class="kpi-title">Jaffar Net Worth</div>
+                <div class="kpi-value" style="color: #319795;">{format_pkr(settings['jaffar_current_net_worth'])}</div>
+                <div class="kpi-subtext">Partner Capital</div>
             </div>
             """, unsafe_allow_html=True)
 
-        with k6:
+        with k9:
             st.markdown(f"""
             <div class="kpi-card">
-                <div class="kpi-title">Tehseen Profit Earned</div>
-                <div class="kpi-value" style="color: #319795;">{format_pkr(tehseen_profit_earned)}</div>
-                <div class="kpi-subtext">Realized Share</div>
+                <div class="kpi-title">Tehseen Net Worth</div>
+                <div class="kpi-value" style="color: #319795;">{format_pkr(settings['tehseen_current_net_worth'])}</div>
+                <div class="kpi-subtext">Partner Capital</div>
             </div>
             """, unsafe_allow_html=True)
+
+        with k10:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-title">Total ROI %</div>
+                <div class="kpi-value" style="color: {'#48BB78' if roi_pct >= 0 else '#F56565'};">{roi_pct:.2f}%</div>
+                <div class="kpi-subtext">Realized Investment Yield</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k11:
+            st.metric("Total Properties", total_properties)
+        with k12:
+            st.metric("Available Properties", available_props)
+        with k13:
+            st.metric("Under Construction", construction_props)
+        with k14:
+            st.metric("Sold Properties", sold_props)
 
         st.divider()
 
         # ----------------------------------------------------------------------
         # PORTFOLIO SUMMARY
         # ----------------------------------------------------------------------
-        st.markdown("### 📊 Business Capital & Net Worth Overview")
+        st.markdown("### 📊 Portfolio Summary")
         
-        sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric("Business Cash", format_pkr(current_cash))
-        sc2.metric("Active Investments Value", format_pkr(active_investments_val))
-        sc3.metric("Realized Profit", format_pkr(total_realized_profit))
-        sc4.metric("Business Net Worth", format_pkr(business_net_worth))
+        cash_utilization = (money_invested / (current_cash + money_invested) * 100) if (current_cash + money_invested) > 0 else 0.0
+        investment_utilization = (money_invested / business_net_worth * 100) if business_net_worth > 0 else 0.0
+        portfolio_growth = (((active_investments_val - money_invested) / money_invested) * 100) if money_invested > 0 else 0.0
+
+        ps1, ps2, ps3, ps4 = st.columns(4)
+        ps1.metric("Cash Utilization %", f"{cash_utilization:.2f}%")
+        ps2.metric("Investment Utilization %", f"{investment_utilization:.2f}%")
+        ps3.metric("Unrealized Growth %", f"{portfolio_growth:.2f}%")
+        ps4.metric("Current Portfolio Value", format_pkr(active_investments_val))
         
-        inv_utilization = (money_invested / business_net_worth * 100) if business_net_worth > 0 else 0.0
-        st.progress(min(max(inv_utilization / 100.0, 0.0), 1.0))
+        st.progress(min(max(cash_utilization / 100.0, 0.0), 1.0))
         st.divider()
 
         # ----------------------------------------------------------------------
         # WHERE MY MONEY IS INVESTED
         # ----------------------------------------------------------------------
         st.markdown("## 💰 Where My Money Is Invested")
-        st.caption("Active unsold properties showing investment exposure and unrealized estimated gains.")
+        st.caption(f"Total Active Investment Exposure: **{format_pkr(money_invested)}**")
         
         if active_props_df.empty:
             st.info("No active property investments found. Add properties to populate cards.")
@@ -532,9 +575,10 @@ elif settings:
                 ownership = prop["our_ownership_pct"]
                 our_inv = prop["our_investment"]
                 exp_selling = prop["expected_selling_price"]
-                our_exp_selling = exp_selling * (ownership / 100.0)
-                unrealized_item = our_exp_selling - our_inv
+                cur_est = prop["current_estimated_value"]
+                our_est_val = cur_est * (ownership / 100.0)
                 portfolio_share = (our_inv / money_invested * 100) if money_invested > 0 else 0.0
+                card_roi = (((our_est_val - our_inv) / our_inv) * 100) if our_inv > 0 else 0.0
                 
                 status_badge = f'<span class="badge-available">Available</span>' if prop["status"] == "Available" else f'<span class="badge-construction">Under Construction</span>'
                 
@@ -551,19 +595,84 @@ elif settings:
                             <div><strong>Total Property Cost:</strong><br>{format_pkr(total_cost)}</div>
                             <div><strong>Our Ownership Percentage:</strong><br><span style="color: #63B3ED; font-weight: 700;">{ownership}%</span></div>
                             <div><strong>Our Investment:</strong><br><span style="color: #ECC94B; font-weight: 700;">{format_pkr(our_inv)}</span></div>
-                            <div><strong>Current Estimated Value:</strong><br>{format_pkr(our_exp_selling)}</div>
+                            <div><strong>Current Estimated Value:</strong><br>{format_pkr(our_est_val)}</div>
                             <div><strong>Expected Selling Price:</strong><br>{format_pkr(exp_selling)}</div>
-                            <div><strong>Unrealized Gain/Loss:</strong><br><span style="color: {'#38B2AC' if unrealized_item >= 0 else '#F56565'}; font-weight: 700;">{format_pkr(unrealized_item)}</span></div>
+                            <div><strong>Portfolio Share:</strong><br><span style="color: #9F7AEA; font-weight: 700;">{portfolio_share:.2f}%</span></div>
+                            <div><strong>Estimated ROI:</strong><br><span style="color: {'#48BB78' if card_roi >= 0 else '#F56565'}; font-weight: 700;">{card_roi:.2f}%</span></div>
                             <div><strong>Dealer:</strong><br><span style="color: #ED8936;">👤 {prop['dealer_name']}</span></div>
-                            <div><strong>Profit Status:</strong><br><span style="color: #A0AEC0;">PKR 0 (Unsold)</span></div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
 
     # ==========================================================================
-    # MODULE 2: PROPERTIES MANAGEMENT
+    # MODULE 2: ADD PROPERTY FORM
     # ==========================================================================
-    elif navigation == "🏢 Properties":
+    elif navigation == "➕ Add Property":
+        st.markdown("# ➕ Register New Property Asset")
+        
+        with st.form("add_property_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                p_name = st.text_input("Property Name *", placeholder="e.g. Blue World City Sector A")
+                p_location = st.text_input("Location *", placeholder="e.g. Rawalpindi / Islamabad")
+                p_type = st.selectbox("Property Type", ["Residential Plot", "Commercial Plot", "House", "Plaza", "Apartment", "Agricultural Land"])
+                p_size = st.text_input("Property Size *", placeholder="e.g. 10 Marla / 1 Kanal")
+                p_purchase_date = st.date_input("Purchase Date", value=date.today())
+                p_buying_price = st.number_input("Buying Price (PKR) *", min_value=0.0, step=50000.0)
+                p_construction_cost = st.number_input("Construction Cost (PKR)", min_value=0.0, step=50000.0)
+                
+            with col2:
+                p_ownership_pct = st.selectbox("Our Ownership Percentage (%) *", [10.0, 20.0, 25.0, 40.0, 50.0, 60.0, 75.0, 100.0], index=7)
+                p_current_estimated_val = st.number_input("Current Estimated Value (PKR)", min_value=0.0, step=50000.0)
+                p_expected_selling_price = st.number_input("Expected Selling Price (PKR) *", min_value=0.0, step=50000.0)
+                p_expected_selling_date = st.date_input("Expected Selling Date", value=date.today())
+                p_dealer_name = st.selectbox("Dealer *", ["Samiullah", "Sheikh Abid"])
+                p_status = st.selectbox("Property Status", ["Available", "Under Construction", "Sold"])
+                p_notes = st.text_area("Notes / Remarks", placeholder="Enter legal or payment details...")
+                
+            calculated_total_cost = p_buying_price + p_construction_cost
+            calculated_our_investment = calculated_total_cost * (p_ownership_pct / 100.0)
+            
+            st.info(f"💡 **Financial Preview:** Total Property Cost: **{format_pkr(calculated_total_cost)}** | Our Investment (Cash Outflow): **{format_pkr(calculated_our_investment)}**")
+
+            submitted = st.form_submit_button("Submit & Register Property", use_container_width=True)
+            
+            if submitted:
+                if not p_name or not p_location or not p_size:
+                    st.error("Please fill in all required fields marked with *.")
+                elif p_ownership_pct < 1.0 or p_ownership_pct > 100.0:
+                    st.error("Ownership Percentage must be between 1% and 100%.")
+                else:
+                    if p_expected_selling_price < calculated_our_investment:
+                        st.warning("⚠️ Warning: Expected Selling Price is lower than Our Investment.")
+                        
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT INTO properties (
+                            property_name, location, property_type, property_size, purchase_date,
+                            buying_price, construction_cost, total_property_cost, our_ownership_pct,
+                            our_investment, current_estimated_value, expected_selling_price, expected_selling_date,
+                            dealer_name, status, notes
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        p_name, p_location, p_type, p_size, str(p_purchase_date),
+                        p_buying_price, p_construction_cost, calculated_total_cost, p_ownership_pct,
+                        calculated_our_investment, p_current_estimated_val, p_expected_selling_price, str(p_expected_selling_date),
+                        p_dealer_name, p_status, p_notes
+                    ))
+                    conn.commit()
+                    conn.close()
+                    
+                    recalculate_business_metrics()
+                    st.success(f"Property '{p_name}' successfully added into portfolio database!")
+                    st.rerun()
+
+    # ==========================================================================
+    # MODULE 3: MANAGE PROPERTIES TABLE
+    # ==========================================================================
+    elif navigation == "🏢 Manage Properties":
         st.markdown("# 🏢 Property Directory & Asset Management")
         
         conn = get_db_connection()
@@ -572,7 +681,7 @@ elif settings:
         
         # Search & Filter Controls
         st.markdown("### 🔍 Search & Filters")
-        f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+        f_col1, f_col2, f_col3, f_col4, f_col5 = st.columns(5)
         
         with f_col1:
             search_q = st.text_input("Search Name / Location", "")
@@ -582,6 +691,8 @@ elif settings:
             f_status = st.selectbox("Status", ["All", "Available", "Under Construction", "Sold"])
         with f_col4:
             f_dealer = st.selectbox("Dealer", ["All", "Samiullah", "Sheikh Abid"])
+        with f_col5:
+            f_ownership = st.selectbox("Ownership %", ["All"] + [f"{x}%" for x in [10, 20, 25, 40, 50, 60, 75, 100]])
 
         filtered_df = props_df.copy()
         if search_q:
@@ -595,13 +706,16 @@ elif settings:
             filtered_df = filtered_df[filtered_df["status"] == f_status]
         if f_dealer != "All":
             filtered_df = filtered_df[filtered_df["dealer_name"] == f_dealer]
+        if f_ownership != "All":
+            val = float(f_ownership.replace("%", ""))
+            filtered_df = filtered_df[filtered_df["our_ownership_pct"] == val]
 
         st.divider()
         st.write(f"Showing **{len(filtered_df)}** properties:")
 
         for idx, row in filtered_df.iterrows():
-            calc_our_exp_val = row["expected_selling_price"] * (row["our_ownership_pct"] / 100.0)
-            calc_unrealized = calc_our_exp_val - row["our_investment"]
+            calc_our_est_val = row["current_estimated_value"] * (row["our_ownership_pct"] / 100.0)
+            calc_roi = (((row["our_profit"]) / row["our_investment"]) * 100) if (row["status"] == "Sold" and row["our_investment"] > 0) else 0.0
 
             with st.expander(f"🏠 {row['property_name']} — {row['location']} | Dealer: {row['dealer_name']} [{row['status']}]"):
                 c1, c2, c3 = st.columns(3)
@@ -627,11 +741,11 @@ elif settings:
                         st.write(f"**Dealer Commission:** {format_pkr(row['dealer_commission'])}")
                         st.write(f"**Jaffar Share:** {format_pkr(row['jaffar_profit'])}")
                         st.write(f"**Tehseen Share:** {format_pkr(row['tehseen_profit'])}")
+                        st.write(f"**Realized ROI:** {calc_roi:.2f}%")
                         st.write(f"**Sold Date:** {row['sold_date']}")
                     else:
                         st.write(f"**Expected Selling Price:** {format_pkr(row['expected_selling_price'])}")
-                        st.write(f"**Current Estimated Value:** {format_pkr(calc_our_exp_val)}")
-                        st.write(f"**Unrealized Gain/Loss:** {format_pkr(calc_unrealized)}")
+                        st.write(f"**Current Estimated Value:** {format_pkr(calc_our_est_val)}")
                         st.write(f"**Expected Selling Date:** {row['expected_selling_date']}")
                         st.info("ℹ️ Unsold Property — Profit, Commission & Shares are PKR 0.")
 
@@ -658,6 +772,9 @@ elif settings:
                                 our_inv = row['our_investment']
                                 our_selling_amt = act_price * (ownership / 100.0)
                                 our_profit = our_selling_amt - our_inv
+                                
+                                if our_profit < 0:
+                                    st.warning("⚠️ Selling Price is lower than Investment. Sale executed with Loss.")
                                 
                                 # Exact Formula Implementation
                                 if our_profit > 0:
@@ -703,10 +820,11 @@ elif settings:
                             e_type = st.selectbox("Type", ["Residential Plot", "Commercial Plot", "House", "Plaza", "Apartment", "Agricultural Land"], index=0)
                             e_size = st.text_input("Size *", value=row["property_size"])
                             e_p_date = st.date_input("Purchase Date", value=datetime.strptime(row["purchase_date"], "%Y-%m-%d").date() if row["purchase_date"] else date.today())
-                            e_buy = st.number_input("Buying Price (PKR)", value=float(row["buying_price"]))
-                            e_const = st.number_input("Construction Cost (PKR)", value=float(row["construction_cost"]))
+                            e_buy = st.number_input("Buying Price (PKR)", value=float(row["buying_price"]), min_value=0.0)
+                            e_const = st.number_input("Construction Cost (PKR)", value=float(row["construction_cost"]), min_value=0.0)
                             e_own = st.number_input("Our Ownership %", min_value=1.0, max_value=100.0, value=float(row["our_ownership_pct"]))
-                            e_exp_p = st.number_input("Expected Selling Price (PKR)", value=float(row["expected_selling_price"]))
+                            e_est_v = st.number_input("Current Estimated Value (PKR)", value=float(row["current_estimated_value"]), min_value=0.0)
+                            e_exp_p = st.number_input("Expected Selling Price (PKR)", value=float(row["expected_selling_price"]), min_value=0.0)
                             e_exp_d = st.date_input("Expected Selling Date", value=datetime.strptime(row["expected_selling_date"], "%Y-%m-%d").date() if row["expected_selling_date"] else date.today())
                             e_dealer = st.selectbox("Dealer", ["Samiullah", "Sheikh Abid"], index=0 if row["dealer_name"] == "Samiullah" else 1)
                             e_status = st.selectbox("Status", ["Available", "Under Construction", "Sold"], index=["Available", "Under Construction", "Sold"].index(row["status"]))
@@ -723,10 +841,10 @@ elif settings:
                                     UPDATE properties
                                     SET property_name=?, location=?, property_type=?, property_size=?, purchase_date=?,
                                         buying_price=?, construction_cost=?, total_property_cost=?,
-                                        our_ownership_pct=?, our_investment=?, expected_selling_price=?, expected_selling_date=?,
+                                        our_ownership_pct=?, our_investment=?, current_estimated_value=?, expected_selling_price=?, expected_selling_date=?,
                                         dealer_name=?, status=?, notes=?, updated_at=CURRENT_TIMESTAMP
                                     WHERE id=?
-                                """, (e_name, e_loc, e_type, e_size, str(e_p_date), e_buy, e_const, e_total_cost, e_own, e_our_inv, e_exp_p, str(e_exp_d), e_dealer, e_status, e_notes, row['id']))
+                                """, (e_name, e_loc, e_type, e_size, str(e_p_date), e_buy, e_const, e_total_cost, e_own, e_our_inv, e_est_v, e_exp_p, str(e_exp_d), e_dealer, e_status, e_notes, row['id']))
                                 conn.commit()
                                 conn.close()
                                 
@@ -746,77 +864,61 @@ elif settings:
                         st.rerun()
 
     # ==========================================================================
-    # MODULE 3: ADD PROPERTY FORM
-    # ==========================================================================
-    elif navigation == "➕ Add Property":
-        st.markdown("# ➕ Register New Property Asset")
-        
-        with st.form("add_property_form"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                p_name = st.text_input("Property Name *", placeholder="e.g. Blue World City Sector A")
-                p_location = st.text_input("Location *", placeholder="e.g. Rawalpindi / Islamabad")
-                p_type = st.selectbox("Property Type", ["Residential Plot", "Commercial Plot", "House", "Plaza", "Apartment", "Agricultural Land"])
-                p_size = st.text_input("Property Size *", placeholder="e.g. 10 Marla / 1 Kanal")
-                p_purchase_date = st.date_input("Purchase Date", value=date.today())
-                p_buying_price = st.number_input("Buying Price (PKR) *", min_value=0.0, step=50000.0)
-                p_construction_cost = st.number_input("Construction Cost (PKR)", min_value=0.0, step=50000.0)
-                
-            with col2:
-                p_ownership_pct = st.selectbox("Our Ownership Percentage (%) *", [10.0, 20.0, 25.0, 40.0, 50.0, 60.0, 75.0, 100.0], index=7)
-                p_expected_selling_price = st.number_input("Expected Selling Price (PKR) *", min_value=0.0, step=50000.0)
-                p_expected_selling_date = st.date_input("Expected Selling Date", value=date.today())
-                p_dealer_name = st.selectbox("Dealer *", ["Samiullah", "Sheikh Abid"])
-                p_status = st.selectbox("Property Status", ["Available", "Under Construction", "Sold"])
-                p_notes = st.text_area("Notes / Remarks", placeholder="Enter legal or payment details...")
-                
-            calculated_total_cost = p_buying_price + p_construction_cost
-            calculated_our_investment = calculated_total_cost * (p_ownership_pct / 100.0)
-            
-            st.info(f"💡 **Financial Preview:** Total Property Cost: **{format_pkr(calculated_total_cost)}** | Our Investment (Cash Outflow): **{format_pkr(calculated_our_investment)}**")
-
-            submitted = st.form_submit_button("Submit & Register Property", use_container_width=True)
-            
-            if submitted:
-                if not p_name or not p_location or not p_size:
-                    st.error("Please fill in all required fields marked with *.")
-                else:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        INSERT INTO properties (
-                            property_name, location, property_type, property_size, purchase_date,
-                            buying_price, construction_cost, total_property_cost, our_ownership_pct,
-                            our_investment, expected_selling_price, expected_selling_date,
-                            dealer_name, status, notes
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        p_name, p_location, p_type, p_size, str(p_purchase_date),
-                        p_buying_price, p_construction_cost, calculated_total_cost, p_ownership_pct,
-                        calculated_our_investment, p_expected_selling_price, str(p_expected_selling_date),
-                        p_dealer_name, p_status, p_notes
-                    ))
-                    conn.commit()
-                    conn.close()
-                    
-                    recalculate_business_metrics()
-                    st.success(f"Property '{p_name}' successfully added into portfolio database!")
-                    st.rerun()
-
-    # ==========================================================================
-    # MODULE 4: PORTFOLIO ANALYTICS
+    # MODULE 4: PORTFOLIO ANALYTICS & ACCOUNTS
     # ==========================================================================
     elif navigation == "📊 Portfolio":
-        st.markdown("# 📊 Advanced Portfolio Analytics")
+        st.markdown("# 📊 Advanced Portfolio Analytics & Partner Accounts")
         
         conn = get_db_connection()
         props_df = pd.read_sql_query("SELECT * FROM properties", conn)
         conn.close()
         
-        if props_df.empty:
-            st.warning("No property data available for analytics. Please add properties first.")
-        else:
+        tab1, tab2, tab3 = st.columns(3)
+        
+        # Dealer Accounts Overview
+        st.markdown("## 👤 Dealer Commission Accounts")
+        dealers = ["Samiullah", "Sheikh Abid"]
+        
+        d_cols = st.columns(2)
+        for idx, d in enumerate(dealers):
+            with d_cols[idx]:
+                d_df = props_df[props_df["dealer_name"] == d] if not props_df.empty else pd.DataFrame()
+                sold_d_df = d_df[d_df["status"] == "Sold"] if not d_df.empty else pd.DataFrame()
+                comm_earned = sold_d_df["dealer_commission"].sum() if not sold_d_df.empty else 0.0
+                
+                st.markdown(f"### 👤 {d}")
+                st.metric("Total Commission Earned", format_pkr(comm_earned))
+                st.write(f"**Sold Deals:** {len(sold_d_df)} | **Total Managed:** {len(d_df)}")
+                if not sold_d_df.empty:
+                    st.dataframe(sold_d_df[["property_name", "actual_selling_price", "our_profit", "dealer_commission", "sold_date"]], use_container_width=True)
+
+        st.divider()
+
+        # Partner Accounts Overview
+        p_col1, p_col2 = st.columns(2)
+        sold_props = props_df[props_df["status"] == "Sold"] if not props_df.empty else pd.DataFrame()
+        
+        with p_col1:
+            st.markdown("## 👥 Jaffar Partner Account")
+            j_profit = sold_props["jaffar_profit"].sum() if not sold_props.empty else 0.0
+            st.metric("Jaffar Net Worth", format_pkr(settings["jaffar_current_net_worth"]))
+            st.metric("Total Profit Earned", format_pkr(j_profit))
+            if not sold_props.empty:
+                st.dataframe(sold_props[["property_name", "actual_selling_price", "our_profit", "jaffar_profit", "sold_date"]], use_container_width=True)
+
+        with p_col2:
+            st.markdown("## 👥 Tehseen Partner Account")
+            t_profit = sold_props["tehseen_profit"].sum() if not sold_props.empty else 0.0
+            st.metric("Tehseen Net Worth", format_pkr(settings["tehseen_current_net_worth"]))
+            st.metric("Total Profit Earned", format_pkr(t_profit))
+            if not sold_props.empty:
+                st.dataframe(sold_props[["property_name", "actual_selling_price", "our_profit", "tehseen_profit", "sold_date"]], use_container_width=True)
+
+        st.divider()
+
+        # Visual Analytics Charts
+        st.markdown("## 📈 Portfolio Visual Analytics")
+        if not props_df.empty:
             c1, c2 = st.columns(2)
             
             with c1:
@@ -826,143 +928,27 @@ elif settings:
                 fig_cash_inv = px.pie(
                     values=[cash_val, active_inv],
                     names=["Liquid Cash", "Active Investments"],
-                    title="Cash vs Active Investment",
+                    title="Cash vs Active Investment Allocation",
                     color_discrete_sequence=["#3182CE", "#ECC94B"],
                     hole=0.4
                 )
                 st.plotly_chart(fig_cash_inv, use_container_width=True)
                 
             with c2:
-                active_df = props_df[props_df["status"].isin(["Available", "Under Construction"])]
-                if not active_df.empty:
-                    fig_dist = px.pie(
-                        active_df,
-                        values="our_investment",
-                        names="property_name",
-                        title="Investment Distribution by Property",
-                        hole=0.4
-                    )
-                    st.plotly_chart(fig_dist, use_container_width=True)
-                else:
-                    st.info("No active properties for allocation breakdown.")
-
-            c3, c4 = st.columns(2)
-            
-            with c3:
                 status_counts = props_df["status"].value_counts().reset_index()
                 status_counts.columns = ["Status", "Count"]
                 fig_status = px.pie(
                     status_counts,
                     values="Count",
                     names="Status",
-                    title="Property Status Distribution",
+                    title="Property Portfolio Status Breakdown",
                     color="Status",
                     color_discrete_map={"Available": "#48BB78", "Under Construction": "#ECC94B", "Sold": "#F56565"}
                 )
                 st.plotly_chart(fig_status, use_container_width=True)
-                
-            with c4:
-                sold_props = props_df[props_df["status"] == "Sold"]
-                if not sold_props.empty:
-                    fig_profit = px.bar(
-                        sold_props,
-                        x="property_name",
-                        y="our_profit",
-                        color="our_profit",
-                        title="Realized Profit / Loss by Property (Sold Only)",
-                        color_continuous_scale=["#F56565", "#48BB78"]
-                    )
-                    st.plotly_chart(fig_profit, use_container_width=True)
-                else:
-                    st.info("No sold properties yet to display realized profit.")
 
     # ==========================================================================
-    # MODULE 5: DEALER ACCOUNTS
-    # ==========================================================================
-    elif navigation == "👤 Dealer Accounts":
-        st.markdown("# 👤 Dealer Commission Accounts")
-        
-        conn = get_db_connection()
-        props_df = pd.read_sql_query("SELECT * FROM properties", conn)
-        conn.close()
-        
-        dealers = ["Samiullah", "Sheikh Abid"]
-        
-        for d in dealers:
-            st.markdown(f"## 👤 {d}")
-            d_df = props_df[props_df["dealer_name"] == d]
-            sold_d_df = d_df[d_df["status"] == "Sold"]
-            
-            comm_earned = sold_d_df["dealer_commission"].sum() if not sold_d_df.empty else 0.0
-            num_deals = len(sold_d_df)
-            total_managed = len(d_df)
-            
-            dc1, dc2, dc3 = st.columns(3)
-            dc1.metric("Commission Earned", format_pkr(comm_earned))
-            dc2.metric("Number of Sold Deals", num_deals)
-            dc3.metric("Total Properties Managed", total_managed)
-            
-            st.markdown(f"**Commission History — {d}**")
-            if not sold_d_df.empty:
-                st.dataframe(sold_d_df[["property_name", "actual_selling_price", "our_profit", "dealer_commission", "sold_date"]], use_container_width=True)
-            else:
-                st.info(f"No completed sales history for {d}.")
-            st.divider()
-
-    # ==========================================================================
-    # MODULE 6: JAFFAR ACCOUNT
-    # ==========================================================================
-    elif navigation == "👥 Jaffar Account":
-        st.markdown("# 👥 Jaffar Partner Account")
-        
-        conn = get_db_connection()
-        props_df = pd.read_sql_query("SELECT * FROM properties", conn)
-        conn.close()
-        
-        sold_props = props_df[props_df["status"] == "Sold"]
-        jaffar_profit = sold_props["jaffar_profit"].sum() if not sold_props.empty else 0.0
-        participated_props = len(props_df)
-        
-        jc1, jc2, jc3 = st.columns(3)
-        jc1.metric("Current Net Worth", format_pkr(settings["jaffar_current_net_worth"]))
-        jc2.metric("Total Realized Profit Earned", format_pkr(jaffar_profit))
-        jc3.metric("Properties Participated", participated_props)
-        
-        st.divider()
-        st.markdown("### 📈 Profit Share History (Sold Properties)")
-        if not sold_props.empty:
-            st.dataframe(sold_props[["property_name", "actual_selling_price", "our_profit", "jaffar_profit", "sold_date"]], use_container_width=True)
-        else:
-            st.info("No realized profit history available.")
-
-    # ==========================================================================
-    # MODULE 7: TEHSEEN ACCOUNT
-    # ==========================================================================
-    elif navigation == "👥 Tehseen Account":
-        st.markdown("# 👥 Tehseen Partner Account")
-        
-        conn = get_db_connection()
-        props_df = pd.read_sql_query("SELECT * FROM properties", conn)
-        conn.close()
-        
-        sold_props = props_df[props_df["status"] == "Sold"]
-        tehseen_profit = sold_props["tehseen_profit"].sum() if not sold_props.empty else 0.0
-        participated_props = len(props_df)
-        
-        tc1, tc2, tc3 = st.columns(3)
-        tc1.metric("Current Net Worth", format_pkr(settings["tehseen_current_net_worth"]))
-        tc2.metric("Total Realized Profit Earned", format_pkr(tehseen_profit))
-        tc3.metric("Properties Participated", participated_props)
-        
-        st.divider()
-        st.markdown("### 📈 Profit Share History (Sold Properties)")
-        if not sold_props.empty:
-            st.dataframe(sold_props[["property_name", "actual_selling_price", "our_profit", "tehseen_profit", "sold_date"]], use_container_width=True)
-        else:
-            st.info("No realized profit history available.")
-
-    # ==========================================================================
-    # MODULE 8: REPORTS & EXPORTS
+    # MODULE 5: REPORTS & EXPORTS
     # ==========================================================================
     elif navigation == "📑 Reports":
         st.markdown("# 📑 Comprehensive Business Reports")
@@ -976,12 +962,14 @@ elif settings:
             [
                 "Property Report",
                 "Investment Report",
-                "Profit Report (Sold Only)",
-                "Loss Report (Sold Only)",
+                "Profit Report",
+                "Loss Report",
                 "Dealer Report",
                 "Jaffar Report",
                 "Tehseen Report",
-                "Portfolio Report"
+                "Portfolio Report",
+                "Cash Flow Report",
+                "Net Worth Report"
             ]
         )
         
@@ -991,9 +979,9 @@ elif settings:
             export_data = props_df
         elif report_choice == "Investment Report":
             export_data = props_df[props_df["status"].isin(["Available", "Under Construction"])]
-        elif report_choice == "Profit Report (Sold Only)":
+        elif report_choice == "Profit Report":
             export_data = props_df[(props_df["status"] == "Sold") & (props_df["our_profit"] > 0)]
-        elif report_choice == "Loss Report (Sold Only)":
+        elif report_choice == "Loss Report":
             export_data = props_df[(props_df["status"] == "Sold") & (props_df["our_profit"] < 0)]
         elif report_choice == "Dealer Report":
             export_data = props_df[props_df["status"] == "Sold"][["property_name", "dealer_name", "actual_selling_price", "our_profit", "dealer_commission", "sold_date"]]
@@ -1002,7 +990,17 @@ elif settings:
         elif report_choice == "Tehseen Report":
             export_data = props_df[props_df["status"] == "Sold"][["property_name", "actual_selling_price", "our_profit", "tehseen_profit", "sold_date"]]
         elif report_choice == "Portfolio Report":
-            export_data = props_df[["property_name", "location", "status", "our_ownership_pct", "our_investment", "expected_selling_price"]]
+            export_data = props_df[["property_name", "location", "status", "our_ownership_pct", "our_investment", "current_estimated_value", "expected_selling_price"]]
+        elif report_choice == "Cash Flow Report":
+            export_data = props_df[["property_name", "purchase_date", "our_investment", "status", "our_selling_amount", "sold_date"]]
+        elif report_choice == "Net Worth Report":
+            export_data = pd.DataFrame([{
+                "Business Name": settings["business_name"],
+                "Business Cash": settings["current_business_cash"],
+                "Jaffar Net Worth": settings["jaffar_current_net_worth"],
+                "Tehseen Net Worth": settings["tehseen_current_net_worth"],
+                "Initial Net Worth": settings["initial_business_net_worth"]
+            }])
             
         st.dataframe(export_data, use_container_width=True)
         st.divider()
@@ -1051,7 +1049,7 @@ elif settings:
             st.download_button("Download PDF", pdf_data, f"{report_choice.lower().replace(' ', '_')}.pdf", "application/pdf", use_container_width=True)
 
     # ==========================================================================
-    # MODULE 9: BUSINESS SETTINGS
+    # MODULE 6: BUSINESS SETTINGS
     # ==========================================================================
     elif navigation == "⚙ Business Settings":
         st.markdown("# ⚙ Business System Configuration")
