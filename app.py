@@ -1,878 +1,1037 @@
-"""
-Property Investment Management System
-======================================
-Single-file Streamlit Application with SQLite backend, Plotly visual analytics,
-real-time calculation logic, and automated report exports.
-"""
-
 import sqlite3
+import hashlib
+import io
+from datetime import date, datetime
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from datetime import date, datetime
-import io
+from fpdf import FPDF
 
 # ==========================================
-# STREAMLIT PAGE CONFIGURATION
+# PAGE CONFIGURATION
 # ==========================================
 st.set_page_config(
-    page_title="Property Investment Management",
+    page_title="Property Investment & Business Portfolio Management Dashboard",
     page_icon="🏢",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="expanded"
 )
 
-# Custom Styling (CSS Injection) for Modern UI/UX Cards and Metrics
-st.markdown(
-    """
-    <style>
-    /* Metric Card Styling */
-    .metric-card {
-        background-color: #f8f9fa;
-        border: 1px solid #e9ecef;
-        border-radius: 10px;
-        padding: 15px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        text-align: center;
-        margin-bottom: 15px;
+# Custom CSS for SaaS Dashboard styling
+st.markdown("""
+<style>
+    /* Global Styles & Fonts */
+    .stApp {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     }
-    .metric-title {
+    
+    /* KPI Card Component Styling */
+    .kpi-card {
+        background-color: var(--background-secondary, #f8f9fa);
+        border: 1px solid var(--border-color, #e9ecef);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .kpi-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
+    }
+    .kpi-title {
         font-size: 0.85rem;
-        color: #6c757d;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.05em;
+        color: #6c757d;
+        margin-bottom: 8px;
     }
-    .metric-value {
-        font-size: 1.4rem;
+    .kpi-value {
+        font-size: 1.6rem;
         font-weight: 700;
-        color: #1e293b;
-        margin-top: 5px;
+        color: #1f2937;
+        margin-bottom: 4px;
     }
-    .metric-value-green {
-        color: #10b981 !important;
+    .kpi-subtitle {
+        font-size: 0.8rem;
+        color: #9ca3af;
     }
-    .metric-value-red {
-        color: #ef4444 !important;
-    }
-    .metric-value-blue {
-        color: #3b82f6 !important;
-    }
-
-    /* Property Card Styling */
-    .property-card {
-        background-color: #ffffff;
-        border-left: 5px solid #3b82f6;
-        border-radius: 8px;
-        padding: 18px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        margin-bottom: 15px;
-    }
-    .status-badge {
-        padding: 4px 10px;
+    
+    /* Property Card Component */
+    .prop-card {
         border-radius: 12px;
+        border-left: 6px solid #2563eb;
+        background-color: var(--background-secondary, #ffffff);
+        border-top: 1px solid #e5e7eb;
+        border-right: 1px solid #e5e7eb;
+        border-bottom: 1px solid #e5e7eb;
+        padding: 18px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
+    .status-available { border-left-color: #2563eb !important; }
+    .status-construction { border-left-color: #f59e0b !important; }
+    .status-sold { border-left-color: #10b981 !important; }
+    
+    /* Badge Pills */
+    .badge {
+        padding: 4px 10px;
+        border-radius: 20px;
         font-size: 0.75rem;
         font-weight: 600;
         display: inline-block;
     }
-    .badge-available { background-color: #e0f2fe; color: #0369a1; }
-    .badge-construction { background-color: #fef3c7; color: #b45309; }
-    .badge-sold { background-color: #dcfce7; color: #15803d; }
-    </style>
-""",
-    unsafe_allow_html=True,
-)
+    .badge-available { background-color: #dbeafe; color: #1e40af; }
+    .badge-construction { background-color: #fef3c7; color: #92400e; }
+    .badge-sold { background-color: #d1fae5; color: #065f46; }
+    
+    /* Utility Divider */
+    .hr-divider {
+        margin: 2rem 0;
+        border: 0;
+        border-top: 1px solid #e5e7eb;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ==========================================
-# DATABASE INITIALIZATION & UTILITIES
+# DATABASE & BACKEND SYSTEM
 # ==========================================
-DB_NAME = "properties.db"
-
+DB_FILE = "portfolio_management.db"
 
 def get_db_connection():
-    """Establishes and returns a connection to the SQLite database."""
-    conn = sqlite3.connect(DB_NAME)
+    """Create and return a database connection with dictionary-like row access."""
+    conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     return conn
 
+def hash_password(password):
+    """Securely hash passwords using SHA-256."""
+    return hashlib.sha256(password.encode()).hexdigest()
 
 def init_db():
-    """Initializes the SQLite database and creates the 'properties' table if not exists."""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS properties (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date_added TEXT NOT NULL,
-                property_name TEXT NOT NULL,
-                location TEXT NOT NULL,
-                buying_price REAL NOT NULL,
-                construction_cost REAL NOT NULL,
-                selling_price REAL NOT NULL,
-                total_investment REAL NOT NULL,
-                profit REAL NOT NULL,
-                dealer_profit REAL NOT NULL,
-                jaffar_profit REAL NOT NULL,
-                tehseen_profit REAL NOT NULL,
-                status TEXT NOT NULL,
-                notes TEXT
-            )
-        """
+    """Initialize database tables and seed default admin user."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL
         )
-        conn.commit()
+    ''')
+    
+    # Settings table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            business_name TEXT NOT NULL,
+            initial_business_cash REAL NOT NULL,
+            initial_business_net_worth REAL NOT NULL,
+            jaffar_initial_net_worth REAL NOT NULL,
+            tehseen_initial_net_worth REAL NOT NULL,
+            dealer_default_commission REAL NOT NULL
+        )
+    ''')
+    
+    # Properties table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS properties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            location TEXT NOT NULL,
+            purchase_date TEXT NOT NULL,
+            buying_price REAL NOT NULL,
+            construction_cost REAL NOT NULL,
+            selling_price REAL DEFAULT 0,
+            property_size TEXT NOT NULL,
+            status TEXT NOT NULL,
+            expected_completion_date TEXT,
+            sold_date TEXT,
+            notes TEXT
+        )
+    ''')
+    
+    # Seed default Admin and Viewer users if none exist
+    cursor.execute("SELECT COUNT(*) FROM users")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                       ("admin", hash_password("admin123"), "Admin"))
+        cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                       ("viewer", hash_password("viewer123"), "Viewer"))
+    
+    conn.commit()
+    conn.close()
 
-
-# Initialize SQLite Database on startup
 init_db()
 
 
 # ==========================================
-# BUSINESS CALCULATIONS LOGIC
+# HELPER FUNCTIONS & CALCULATIONS
 # ==========================================
-def calculate_investment_metrics(buying_price, construction_cost, selling_price):
-    """
-    Calculates total investment, profit, and partner profit splits based on business rules:
-    - Total Investment = Buying Price + Construction Cost
-    - Profit = Selling Price - Total Investment
-    - Dealer Profit = 25% of Profit (if profit > 0, else 0)
-    - Remaining Profit = 75% of Profit
-    - Jaffar Profit = Remaining Profit / 2 (if profit > 0, else 0)
-    - Tehseen Profit = Remaining Profit / 2 (if profit > 0, else 0)
-    """
-    total_investment = buying_price + construction_cost
-    profit = selling_price - total_investment
-
-    if profit > 0:
-        dealer_profit = profit * 0.25
-        remaining_profit = profit * 0.75
-        jaffar_profit = remaining_profit / 2.0
-        tehseen_profit = remaining_profit / 2.0
+def format_pkr(amount):
+    """Format numerical values into Pakistani standard currency string representation."""
+    if amount is None:
+        amount = 0.0
+    is_negative = amount < 0
+    amount = abs(amount)
+    
+    s = f"{amount:.2f}"
+    parts = s.split('.')
+    whole = parts[0]
+    decimals = parts[1]
+    
+    if len(whole) > 3:
+        last_three = whole[-3:]
+        other_digits = whole[:-3]
+        res = ""
+        while len(other_digits) > 2:
+            res = "," + other_digits[-2:] + res
+            other_digits = other_digits[:-2]
+        if other_digits:
+            res = other_digits + res
+        formatted_whole = res + "," + last_three
     else:
-        dealer_profit = 0.0
-        jaffar_profit = 0.0
-        tehseen_profit = 0.0
+        formatted_whole = whole
+        
+    formatted = f"PKR {formatted_whole}"
+    if decimals != "00":
+        formatted += f".{decimals}"
+    return f"-{formatted}" if is_negative else formatted
+
+def get_settings():
+    """Retrieve system business settings."""
+    conn = get_db_connection()
+    settings = conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
+    conn.close()
+    return settings
+
+def update_settings(business_name, cash, net_worth, jaffar_nw, tehseen_nw, commission):
+    """Update or insert default business settings."""
+    conn = get_db_connection()
+    conn.execute('''
+        INSERT INTO settings (id, business_name, initial_business_cash, initial_business_net_worth, jaffar_initial_net_worth, tehseen_initial_net_worth, dealer_default_commission)
+        VALUES (1, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            business_name=excluded.business_name,
+            initial_business_cash=excluded.initial_business_cash,
+            initial_business_net_worth=excluded.initial_business_net_worth,
+            jaffar_initial_net_worth=excluded.jaffar_initial_net_worth,
+            tehseen_initial_net_worth=excluded.tehseen_initial_net_worth,
+            dealer_default_commission=excluded.dealer_default_commission
+    ''', (business_name, cash, net_worth, jaffar_nw, tehseen_nw, commission))
+    conn.commit()
+    conn.close()
+
+def get_all_properties():
+    """Fetch all property records from database."""
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM properties", conn)
+    conn.close()
+    return df
+
+def calculate_portfolio_metrics():
+    """
+    Core Financial Engine: Computes real-time dynamic portfolio metrics,
+    wallets, profit shares, commissions, and current business status.
+    """
+    settings = get_settings()
+    if not settings:
+        return None
+
+    init_cash = settings["initial_business_cash"]
+    init_jaffar = settings["jaffar_initial_net_worth"]
+    init_tehseen = settings["tehseen_initial_net_worth"]
+    default_comm_pct = settings["dealer_default_commission"] / 100.0
+
+    df = get_all_properties()
+
+    total_active_investment = 0.0
+    total_unsold_current_value = 0.0
+    total_realized_profit = 0.0
+    total_realized_loss = 0.0
+    total_dealer_commission = 0.0
+    total_jaffar_earned = 0.0
+    total_tehseen_earned = 0.0
+    
+    cash_flow_adjustments = 0.0
+
+    processed_properties = []
+
+    for _, prop in df.iterrows():
+        buying = float(prop["buying_price"])
+        const = float(prop["construction_cost"])
+        selling = float(prop["selling_price"])
+        status = prop["status"]
+        investment = buying + const
+
+        if status in ["Available", "Under Construction"]:
+            total_active_investment += investment
+            total_unsold_current_value += investment
+            cash_flow_adjustments -= investment
+            profit = 0.0
+            loss = 0.0
+            dealer_comm = 0.0
+            jaffar_share = 0.0
+            tehseen_share = 0.0
+        else:  # Status == "Sold"
+            cash_flow_adjustments -= investment
+            cash_flow_adjustments += selling
+            
+            if selling > investment:
+                profit = selling - investment
+                loss = 0.0
+                dealer_comm = profit * default_comm_pct
+                rem_profit = profit - dealer_comm
+                jaffar_share = rem_profit * 0.50  # 37.5% of total profit
+                tehseen_share = rem_profit * 0.50 # 37.5% of total profit
+            else:
+                profit = 0.0
+                loss = investment - selling
+                dealer_comm = 0.0
+                jaffar_share = 0.0
+                tehseen_share = 0.0
+
+        total_realized_profit += profit
+        total_realized_loss += loss
+        total_dealer_commission += dealer_comm
+        total_jaffar_earned += jaffar_share
+        total_tehseen_earned += tehseen_share
+
+        p_dict = dict(prop)
+        p_dict["investment"] = investment
+        p_dict["profit"] = profit
+        p_dict["loss"] = loss
+        p_dict["dealer_commission"] = dealer_comm
+        p_dict["jaffar_share"] = jaffar_share
+        p_dict["tehseen_share"] = tehseen_share
+        processed_properties.append(p_dict)
+
+    current_business_cash = init_cash + cash_flow_adjustments
+    current_business_net_worth = current_business_cash + total_unsold_current_value
+    jaffar_current_net_worth = init_jaffar + total_jaffar_earned
+    tehseen_current_net_worth = init_tehseen + total_tehseen_earned
+
+    proc_df = pd.DataFrame(processed_properties) if processed_properties else pd.DataFrame()
 
     return {
-        "total_investment": total_investment,
-        "profit": profit,
-        "dealer_profit": dealer_profit,
-        "jaffar_profit": jaffar_profit,
-        "tehseen_profit": tehseen_profit,
+        "business_cash": current_business_cash,
+        "business_net_worth": current_business_net_worth,
+        "active_investment": total_active_investment,
+        "portfolio_value": total_unsold_current_value,
+        "total_profit": total_realized_profit,
+        "total_loss": total_realized_loss,
+        "dealer_earnings": total_dealer_commission,
+        "jaffar_net_worth": jaffar_current_net_worth,
+        "jaffar_profit": total_jaffar_earned,
+        "tehseen_net_worth": tehseen_current_net_worth,
+        "tehseen_profit": total_tehseen_earned,
+        "properties_df": proc_df,
+        "total_properties": len(df),
+        "available_count": len(df[df["status"] == "Available"]) if not df.empty else 0,
+        "construction_count": len(df[df["status"] == "Under Construction"]) if not df.empty else 0,
+        "sold_count": len(df[df["status"] == "Sold"]) if not df.empty else 0,
     }
 
 
-def format_currency(amount):
-    """Formats raw floats into clean currency format with thousands separators."""
-    if amount < 0:
-        return f"-${abs(amount):,.2f}"
-    return f"${amount:,.2f}"
+# ==========================================
+# AUTHENTICATION MANAGEMENT
+# ==========================================
+def login_page():
+    """Render unified Login interface."""
+    st.markdown("<h2 style='text-align: center;'>🏢 Property Investment System</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #6c757d;'>Sign in to access your business portfolio dashboard</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submit = st.form_submit_button("Sign In", use_container_width=True)
+            
+            if submit:
+                conn = get_db_connection()
+                hashed_pw = hash_password(password)
+                user = conn.execute("SELECT * FROM users WHERE username = ? AND password = ?", 
+                                    (username, hashed_pw)).fetchone()
+                conn.close()
+                
+                if user:
+                    st.session_state["authenticated"] = True
+                    st.session_state["username"] = user["username"]
+                    st.session_state["role"] = user["role"]
+                    st.success(f"Welcome back, {user['username']}!")
+                    st.rerun()
+                else:
+                    st.error("Invalid Username or Password.")
 
 
 # ==========================================
-# DATABASE CRUD OPERATIONS
+# INITIAL BUSINESS SETUP
 # ==========================================
-def insert_property(data):
-    """Inserts a new property record into the database."""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO properties (
-                date_added, property_name, location, buying_price,
-                construction_cost, selling_price, total_investment,
-                profit, dealer_profit, jaffar_profit, tehseen_profit,
-                status, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                data["date_added"],
-                data["property_name"],
-                data["location"],
-                data["buying_price"],
-                data["construction_cost"],
-                data["selling_price"],
-                data["total_investment"],
-                data["profit"],
-                data["dealer_profit"],
-                data["jaffar_profit"],
-                data["tehseen_profit"],
-                data["status"],
-                data["notes"],
-            ),
-        )
-        conn.commit()
-
-
-def update_property(property_id, data):
-    """Updates an existing property record in the database."""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            UPDATE properties SET
-                date_added = ?, property_name = ?, location = ?,
-                buying_price = ?, construction_cost = ?, selling_price = ?,
-                total_investment = ?, profit = ?, dealer_profit = ?,
-                jaffar_profit = ?, tehseen_profit = ?, status = ?, notes = ?
-            WHERE id = ?
-        """,
-            (
-                data["date_added"],
-                data["property_name"],
-                data["location"],
-                data["buying_price"],
-                data["construction_cost"],
-                data["selling_price"],
-                data["total_investment"],
-                data["profit"],
-                data["dealer_profit"],
-                data["jaffar_profit"],
-                data["tehseen_profit"],
-                data["status"],
-                data["notes"],
-                property_id,
-            ),
-        )
-        conn.commit()
-
-
-def delete_property_by_id(property_id):
-    """Deletes a property record by ID."""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM properties WHERE id = ?", (property_id,))
-        conn.commit()
-
-
-def fetch_all_properties():
-    """Retrieves all property records as a Pandas DataFrame."""
-    with get_db_connection() as conn:
-        df = pd.read_sql_query(
-            "SELECT * FROM properties ORDER BY id DESC", conn
-        )
-    return df
-
-
-def fetch_property_by_id(property_id):
-    """Retrieves a single property record by ID."""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM properties WHERE id = ?", (property_id,)
-        )
-        row = cursor.fetchone()
-    return dict(row) if row else None
-
-
-# ==========================================
-# SIDEBAR NAVIGATION
-# ==========================================
-st.sidebar.title("🏢 Property Manager")
-st.sidebar.markdown("---")
-
-menu_choice = st.sidebar.radio(
-    "Navigation Menu",
-    ["Dashboard", "Add Property", "Manage Properties", "Reports", "Settings"],
-)
-
-st.sidebar.markdown("---")
-st.sidebar.caption("Property Investment Management System v1.0")
-
-
-# ==========================================
-# PAGE 1: DASHBOARD
-# ==========================================
-if menu_choice == "Dashboard":
-    st.title("📊 Investment Dashboard")
-    st.markdown("Overview of portfolio performance, profit splits, and asset analytics.")
-
-    df = fetch_all_properties()
-
-    if df.empty:
-        st.info("No properties found in the database. Please add a property to view dashboard statistics.")
-    else:
-        # Aggregations
-        total_properties = len(df)
-        total_investment = df["total_investment"].sum()
-        total_selling_value = df["selling_price"].sum()
-        total_profit = df["profit"].sum()
-
-        dealer_total = df["dealer_profit"].sum()
-        jaffar_total = df["jaffar_profit"].sum()
-        tehseen_total = df["tehseen_profit"].sum()
-
-        total_loss = abs(df[df["profit"] < 0]["profit"].sum())
-        net_portfolio_value = total_selling_value
-
-        # Top Summary Metric Cards
-        col1, col2, col3, col4 = st.columns(4)
-
+def initial_setup_page():
+    """Mandatory initial business setup modal/screen."""
+    st.markdown("## ⚙️ Initial Business Setup")
+    st.info("Welcome! Please configure your core financial baselines to initialize the system.")
+    
+    with st.form("setup_form"):
+        business_name = st.text_input("Business Name", value="Jaffar & Tehseen Real Estate Ventures")
+        col1, col2 = st.columns(2)
         with col1:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-title">Total Properties</div>
-                    <div class="metric-value metric-value-blue">{total_properties}</div>
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
-
+            init_cash = st.number_input("Initial Business Cash (PKR)", min_value=0.0, value=10000000.0, step=100000.0)
+            jaffar_nw = st.number_input("Jaffar Initial Net Worth (PKR)", min_value=0.0, value=5000000.0, step=100000.0)
         with col2:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-title">Total Investment</div>
-                    <div class="metric-value">{format_currency(total_investment)}</div>
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
+            init_nw = st.number_input("Initial Business Net Worth (PKR)", min_value=0.0, value=10000000.0, step=100000.0)
+            tehseen_nw = st.number_input("Tehseen Initial Net Worth (PKR)", min_value=0.0, value=5000000.0, step=100000.0)
+            
+        commission = st.number_input("Default Dealer Commission (%)", min_value=0.0, max_value=100.0, value=25.0, step=1.0)
+        
+        submit = st.form_submit_button("Save & Initialize Application", use_container_width=True)
+        if submit:
+            if not business_name.strip():
+                st.error("Business Name is required.")
+            else:
+                update_settings(business_name, init_cash, init_nw, jaffar_nw, tehseen_nw, commission)
+                st.success("Business settings saved successfully!")
+                st.rerun()
 
-        with col3:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-title">Total Selling Value</div>
-                    <div class="metric-value">{format_currency(total_selling_value)}</div>
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
 
-        with col4:
-            profit_color_class = "metric-value-green" if total_profit >= 0 else "metric-value-red"
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-title">Total Net Profit</div>
-                    <div class="metric-value {profit_color_class}">{format_currency(total_profit)}</div>
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
+# ==========================================
+# REPORT GENERATION (PDF)
+# ==========================================
+def generate_pdf_report(metrics):
+    """Generate structured executive PDF report."""
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    
+    settings = get_settings()
+    b_name = settings["business_name"] if settings else "Real Estate Investment Portfolio"
+    
+    pdf.cell(0, 10, f"{b_name} - Executive Portfolio Report", ln=True, align="C")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 8, f"Generated Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align="C")
+    pdf.ln(5)
+    
+    # Financial Overview Section
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Financial Summary Overview", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    
+    pdf.cell(95, 7, f"Business Net Worth: {format_pkr(metrics['business_net_worth'])}", border=1)
+    pdf.cell(95, 7, f"Business Cash Available: {format_pkr(metrics['business_cash'])}", border=1, ln=True)
+    pdf.cell(95, 7, f"Money Invested: {format_pkr(metrics['active_investment'])}", border=1)
+    pdf.cell(95, 7, f"Total Profit Earned: {format_pkr(metrics['total_profit'])}", border=1, ln=True)
+    pdf.cell(95, 7, f"Jaffar Net Worth: {format_pkr(metrics['jaffar_net_worth'])}", border=1)
+    pdf.cell(95, 7, f"Tehseen Net Worth: {format_pkr(metrics['tehseen_net_worth'])}", border=1, ln=True)
+    pdf.cell(95, 7, f"Dealer Commissions Paid: {format_pkr(metrics['dealer_earnings'])}", border=1)
+    pdf.cell(95, 7, f"Total Realized Loss: {format_pkr(metrics['total_loss'])}", border=1, ln=True)
+    
+    pdf.ln(8)
+    
+    # Properties Section Table
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Properties Summary", ln=True)
+    pdf.set_font("Helvetica", "B", 9)
+    
+    pdf.cell(45, 7, "Property Name", border=1)
+    pdf.cell(35, 7, "Location", border=1)
+    pdf.cell(30, 7, "Status", border=1)
+    pdf.cell(40, 7, "Investment", border=1)
+    pdf.cell(40, 7, "Profit/Loss", border=1, ln=True)
+    
+    pdf.set_font("Helvetica", "", 8)
+    df = metrics["properties_df"]
+    if not df.empty:
+        for _, row in df.iterrows():
+            pdf.cell(45, 6, str(row["name"])[:22], border=1)
+            pdf.cell(35, 6, str(row["location"])[:18], border=1)
+            pdf.cell(30, 6, str(row["status"]), border=1)
+            pdf.cell(40, 6, format_pkr(row["investment"]), border=1)
+            p_val = row["profit"] if row["status"] == "Sold" else 0.0
+            pdf.cell(40, 6, format_pkr(p_val), border=1, ln=True)
+            
+    return pdf.output()
 
-        # Secondary Summary Metric Cards
-        sc1, sc2, sc3, sc4, sc5 = st.columns(5)
 
-        with sc1:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-title">Dealer Profit</div>
-                    <div class="metric-value metric-value-green">{format_currency(dealer_total)}</div>
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
+# ==========================================
+# MODULES / PAGES
+# ==========================================
 
-        with sc2:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-title">Jaffar Profit</div>
-                    <div class="metric-value metric-value-green">{format_currency(jaffar_total)}</div>
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
+# ------------------------------------------
+# 1. DASHBOARD PAGE
+# ------------------------------------------
+def render_dashboard(metrics):
+    """Render executive SaaS dashboard interface."""
+    st.title("📊 Financial Dashboard")
+    
+    # Top Level KPI Row
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-title">Business Net Worth</div>
+                <div class="kpi-value" style="color: #2563eb;">{format_pkr(metrics['business_net_worth'])}</div>
+                <div class="kpi-subtitle">Cash + Unsold Assets</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-title">Cash Available</div>
+                <div class="kpi-value" style="color: #059669;">{format_pkr(metrics['business_cash'])}</div>
+                <div class="kpi-subtitle">Liquid Balance</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-title">Money Invested</div>
+                <div class="kpi-value" style="color: #d97706;">{format_pkr(metrics['active_investment'])}</div>
+                <div class="kpi-subtitle">Active Investments</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with c4:
+        st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-title">Current Portfolio Value</div>
+                <div class="kpi-value">{format_pkr(metrics['portfolio_value'])}</div>
+                <div class="kpi-subtitle">Unsold Property Value</div>
+            </div>
+        """, unsafe_allow_html=True)
 
-        with sc3:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-title">Tehseen Profit</div>
-                    <div class="metric-value metric-value-green">{format_currency(tehseen_total)}</div>
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
+    # Secondary KPI Row
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Total Profit</div><div class="kpi-value" style="color:#10b981;">{format_pkr(metrics['total_profit'])}</div></div>""", unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Total Loss</div><div class="kpi-value" style="color:#ef4444;">{format_pkr(metrics['total_loss'])}</div></div>""", unsafe_allow_html=True)
+    with k3:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Dealer Earnings</div><div class="kpi-value">{format_pkr(metrics['dealer_earnings'])}</div></div>""", unsafe_allow_html=True)
+    with k4:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Jaffar Net Worth</div><div class="kpi-value" style="color:#8b5cf6;">{format_pkr(metrics['jaffar_net_worth'])}</div><div class="kpi-subtitle">Earned: {format_pkr(metrics['jaffar_profit'])}</div></div>""", unsafe_allow_html=True)
+    with k5:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Tehseen Net Worth</div><div class="kpi-value" style="color:#6366f1;">{format_pkr(metrics['tehseen_net_worth'])}</div><div class="kpi-subtitle">Earned: {format_pkr(metrics['tehseen_profit'])}</div></div>""", unsafe_allow_html=True)
 
-        with sc4:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-title">Total Portfolio Loss</div>
-                    <div class="metric-value metric-value-red">{format_currency(total_loss)}</div>
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
+    # Property Counts Metrics
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Total Properties", metrics['total_properties'])
+    p2.metric("Available", metrics['available_count'])
+    p3.metric("Under Construction", metrics['construction_count'])
+    p4.metric("Sold", metrics['sold_count'])
 
-        with sc5:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-title">Net Asset Value</div>
-                    <div class="metric-value metric-value-blue">{format_currency(net_portfolio_value)}</div>
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
+    st.markdown("<hr class='hr-divider'>", unsafe_allow_html=True)
 
-        st.markdown("---")
+    # SECTION: Where My Money Is Invested
+    st.subheader("📍 Where My Money Is Invested")
+    st.markdown(f"**Total Invested in Active Properties:** `{format_pkr(metrics['active_investment'])}`")
+    
+    df = metrics["properties_df"]
+    if not df.empty:
+        active_props = df[df["status"].isin(["Available", "Under Construction"])]
+        if not active_props.empty:
+            cols = st.columns(3)
+            idx = 0
+            for _, prop in active_props.iterrows():
+                with cols[idx % 3]:
+                    status_class = "status-available" if prop["status"] == "Available" else "status-construction"
+                    badge_class = "badge-available" if prop["status"] == "Available" else "badge-construction"
+                    pct = (prop["investment"] / metrics['active_investment'] * 100) if metrics['active_investment'] > 0 else 0
+                    
+                    st.markdown(f"""
+                        <div class="prop-card {status_class}">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <h4 style="margin:0; font-size:1.1rem; color:#1f2937;">{prop['name']}</h4>
+                                <span class="badge {badge_class}">{prop['status']}</span>
+                            </div>
+                            <p style="margin:2px 0; color:#6b7280; font-size:0.85rem;">📍 {prop['location']}</p>
+                            <p style="margin:2px 0; color:#6b7280; font-size:0.85rem;">📅 Purchased: {prop['purchase_date']}</p>
+                            <hr style="margin:8px 0; border:0; border-top:1px solid #f3f4f6;">
+                            <div style="display:flex; justify-content:space-between; margin-top:5px;">
+                                <div>
+                                    <span style="font-size:0.75rem; color:#9ca3af;">Investment</span><br>
+                                    <strong style="color:#111827; font-size:0.95rem;">{format_pkr(prop['investment'])}</strong>
+                                </div>
+                                <div>
+                                    <span style="font-size:0.75rem; color:#9ca3af;">Portfolio Share</span><br>
+                                    <strong style="color:#2563eb; font-size:0.95rem;">{pct:.1f}%</strong>
+                                </div>
+                            </div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                idx += 1
+        else:
+            st.info("No active properties under investment at the moment.")
+    else:
+        st.info("No properties recorded yet.")
 
-        # Interactive Charts Section
-        st.subheader("📈 Portfolio Analytics")
 
-        chart_col1, chart_col2 = st.columns([1, 1])
-
-        with chart_col1:
-            # Profit Distribution Pie Chart
-            partner_profits = {
-                "Dealer": dealer_total,
-                "Jaffar": jaffar_total,
-                "Tehseen": tehseen_total,
-            }
-            profit_split_df = pd.DataFrame(
-                list(partner_profits.items()), columns=["Partner", "Profit"]
-            )
-
-            fig_pie = px.pie(
-                profit_split_df,
-                names="Partner",
-                values="Profit",
-                title="Profit Distribution Among Partners",
-                color_discrete_sequence=["#2563eb", "#10b981", "#f59e0b"],
-                hole=0.4,
-            )
-            fig_pie.update_traces(textposition="inside", textinfo="percent+label")
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-        with chart_col2:
-            # Property Profit Comparison Bar Chart
-            fig_bar = px.bar(
+# ------------------------------------------
+# 2. PORTFOLIO PAGE
+# ------------------------------------------
+def render_portfolio(metrics):
+    """Render analytical charts and portfolio breakdown."""
+    st.title("💼 Asset Allocation & Analytics")
+    
+    # Financial Overview Banner
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Current Cash", format_pkr(metrics["business_cash"]))
+    col2.metric("Active Investments", format_pkr(metrics["active_investment"]))
+    col3.metric("Current Net Worth", format_pkr(metrics["business_net_worth"]))
+    
+    st.markdown("<hr class='hr-divider'>", unsafe_allow_html=True)
+    
+    df = metrics["properties_df"]
+    
+    # Grid Charts Row 1
+    g1, g2 = st.columns(2)
+    
+    with g1:
+        st.subheader("Liquid Cash vs Invested")
+        fig1 = px.pie(
+            values=[max(0, metrics["business_cash"]), metrics["active_investment"]],
+            names=["Available Cash", "Invested Capital"],
+            color_discrete_sequence=["#10b981", "#3b82f6"],
+            hole=0.4
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+        
+    with g2:
+        st.subheader("Investment Distribution by Property")
+        if not df.empty:
+            fig2 = px.pie(
                 df,
-                x="property_name",
+                values="investment",
+                names="name",
+                title="Capital Deployment per Property",
+                hole=0.3
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info("No properties available for charting.")
+
+    # Grid Charts Row 2
+    g3, g4 = st.columns(2)
+    
+    with g3:
+        st.subheader("Profitability by Property")
+        if not df.empty and not df[df["status"] == "Sold"].empty:
+            sold_df = df[df["status"] == "Sold"]
+            fig3 = px.bar(
+                sold_df,
+                x="name",
                 y="profit",
                 color="profit",
-                title="Property Profit / Loss Comparison",
-                color_continuous_scale=["#ef4444", "#10b981"],
-                labels={"profit": "Profit ($)", "property_name": "Property"},
+                color_continuous_scale="Greens",
+                labels={"profit": "Profit (PKR)", "name": "Property"},
+                title="Realized Net Profit"
             )
-            fig_bar.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-        # Timeline Line Chart
-        st.subheader("🗓️ Investment Timeline")
-
-        df_sorted = df.sort_values(by="date_added")
-        fig_line = px.line(
-            df_sorted,
-            x="date_added",
-            y=["total_investment", "selling_price", "profit"],
-            title="Investment & Value Progression Over Time",
-            markers=True,
-            labels={"value": "Amount ($)", "date_added": "Date", "variable": "Metric"},
-            color_discrete_map={
-                "total_investment": "#2563eb",
-                "selling_price": "#10b981",
-                "profit": "#f59e0b",
-            },
-        )
-        st.plotly_chart(fig_line, use_container_width=True)
-
-
-# ==========================================
-# PAGE 2: ADD PROPERTY
-# ==========================================
-elif menu_choice == "Add Property":
-    st.title("➕ Add New Property")
-    st.markdown("Enter details below to register a new property investment.")
-
-    with st.form("add_property_form", clear_on_submit=False):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            prop_date = st.date_input("Date", value=date.today())
-            prop_name = st.text_input("Property Name *", placeholder="e.g. Sunset Apartments Block A")
-            prop_location = st.text_input("Location *", placeholder="e.g. Downtown Sector 4")
-            prop_status = st.selectbox(
-                "Status", ["Available", "Under Construction", "Sold"]
-            )
-
-        with col2:
-            buying_price = st.number_input(
-                "Buying Price ($)", min_value=0.0, value=0.0, step=1000.0, format="%.2f"
-            )
-            construction_cost = st.number_input(
-                "Construction Cost ($)", min_value=0.0, value=0.0, step=500.0, format="%.2f"
-            )
-            selling_price = st.number_input(
-                "Selling Price ($)", min_value=0.0, value=0.0, step=1000.0, format="%.2f"
-            )
-
-        prop_notes = st.text_area("Notes / Remarks", placeholder="Enter additional details...")
-
-        # Live Calculation Preview
-        metrics = calculate_investment_metrics(buying_price, construction_cost, selling_price)
-
-        st.markdown("### 🧮 Live Calculation Preview")
-        pcol1, pcol2, pcol3, pcol4 = st.columns(4)
-        pcol1.metric("Total Investment", format_currency(metrics["total_investment"]))
-
-        profit_val = metrics["profit"]
-        if profit_val < 0:
-            pcol2.metric("Loss", format_currency(profit_val), delta=format_currency(profit_val), delta_color="inverse")
+            st.plotly_chart(fig3, use_container_width=True)
         else:
-            pcol2.metric("Profit", format_currency(profit_val), delta=format_currency(profit_val))
+            st.info("No sold properties to display realized profit.")
 
-        pcol3.metric("Dealer Profit (25%)", format_currency(metrics["dealer_profit"]))
-        pcol4.metric("Jaffar / Tehseen Each", format_currency(metrics["jaffar_profit"]))
+    with g4:
+        st.subheader("Investment Timeline")
+        if not df.empty:
+            df_sorted = df.sort_values("purchase_date")
+            fig4 = px.line(
+                df_sorted,
+                x="purchase_date",
+                y="investment",
+                markers=True,
+                title="Property Acquisition Investments Over Time",
+                labels={"purchase_date": "Purchase Date", "investment": "Investment (PKR)"}
+            )
+            st.plotly_chart(fig4, use_container_width=True)
+        else:
+            st.info("No property history available.")
 
-        if selling_price > 0 and selling_price < metrics["total_investment"]:
-            st.warning("⚠️ Warning: Selling Price is lower than Total Investment. This record will result in a LOSS.")
 
-        submit_btn = st.form_submit_button("💾 Save Property", use_container_width=True)
+# ------------------------------------------
+# 3. ADD PROPERTY PAGE
+# ------------------------------------------
+def render_add_property():
+    """Form interface to add a new property record."""
+    st.title("➕ Add New Property")
+    
+    if st.session_state.get("role") != "Admin":
+        st.error("Access Restricted: Only Admins can add property records.")
+        return
 
-        if submit_btn:
-            # Validations
-            if not prop_name.strip():
-                st.error("Validation Error: Property Name cannot be empty.")
-            elif not prop_location.strip():
-                st.error("Validation Error: Location cannot be empty.")
+    with st.form("add_property_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Property Name*")
+            location = st.text_input("Location*")
+            buying_price = st.number_input("Buying Price (PKR)*", min_value=0.0, value=0.0, step=50000.0)
+            construction_cost = st.number_input("Construction Cost (PKR)", min_value=0.0, value=0.0, step=50000.0)
+            property_size = st.text_input("Property Size (e.g., 5 Marla, 1 Kanal)*")
+            
+        with col2:
+            status = st.selectbox("Status*", ["Available", "Under Construction", "Sold"])
+            purchase_date = st.date_input("Purchase Date", value=date.today())
+            expected_completion = st.date_input("Expected Completion Date", value=date.today())
+            sold_date = st.date_input("Sold Date (If Sold)", value=date.today())
+            selling_price = st.number_input("Selling Price (PKR) (If Sold)", min_value=0.0, value=0.0, step=50000.0)
+
+        notes = st.text_area("Notes / Remarks")
+        
+        # Validation checks
+        inv_calc = buying_price + construction_cost
+        if status == "Sold" and selling_price < inv_calc and selling_price > 0:
+            st.warning("⚠️ Warning: Selling Price is lower than total investment (Buying Price + Construction Cost). This sale will result in a loss.")
+
+        submit = st.form_submit_button("Save & Register Property", use_container_width=True)
+        
+        if submit:
+            if not name.strip() or not location.strip() or not property_size.strip():
+                st.error("Please fill in all required fields (Name, Location, Size).")
+            elif buying_price <= 0:
+                st.error("Buying Price must be greater than 0.")
             else:
-                property_payload = {
-                    "date_added": prop_date.strftime("%Y-%m-%d"),
-                    "property_name": prop_name.strip(),
-                    "location": prop_location.strip(),
-                    "buying_price": buying_price,
-                    "construction_cost": construction_cost,
-                    "selling_price": selling_price,
-                    "total_investment": metrics["total_investment"],
-                    "profit": metrics["profit"],
-                    "dealer_profit": metrics["dealer_profit"],
-                    "jaffar_profit": metrics["jaffar_profit"],
-                    "tehseen_profit": metrics["tehseen_profit"],
-                    "status": prop_status,
-                    "notes": prop_notes.strip(),
-                }
+                conn = get_db_connection()
+                conn.execute('''
+                    INSERT INTO properties (
+                        name, location, purchase_date, buying_price, construction_cost,
+                        selling_price, property_size, status, expected_completion_date,
+                        sold_date, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    name.strip(), location.strip(), str(purchase_date), buying_price,
+                    construction_cost, selling_price if status == "Sold" else 0.0,
+                    property_size.strip(), status,
+                    str(expected_completion) if status == "Under Construction" else None,
+                    str(sold_date) if status == "Sold" else None, notes.strip()
+                ))
+                conn.commit()
+                conn.close()
+                st.success(f"Property '{name}' added successfully!")
 
-                insert_property(property_payload)
-                st.success(f"✅ Property '{prop_name}' saved successfully!")
 
-
-# ==========================================
-# PAGE 3: MANAGE PROPERTIES
-# ==========================================
-elif menu_choice == "Manage Properties":
+# ------------------------------------------
+# 4. MANAGE PROPERTIES PAGE
+# ------------------------------------------
+def render_manage_properties(metrics):
+    """Property management grid with search, filter, inline view, edit, and delete capability."""
     st.title("🛠️ Manage Properties")
-    st.markdown("Search, view, update, or remove existing properties.")
-
-    df = fetch_all_properties()
-
+    
+    df = metrics["properties_df"]
     if df.empty:
-        st.info("No properties registered yet.")
-    else:
-        # Search and Filter Section
-        fcol1, fcol2, fcol3 = st.columns([2, 1, 1])
+        st.info("No properties found in the system database.")
+        return
 
-        with fcol1:
-            search_query = st.text_input("🔍 Search Property Name or Location", "")
+    # Search & Filter Controls
+    col_s, col_f = st.columns([2, 1])
+    with col_s:
+        search_query = st.text_input("🔍 Search by Property Name, Location, or Date", "")
+    with col_f:
+        status_filter = st.selectbox("Filter Status", ["All", "Available", "Under Construction", "Sold"])
 
-        with fcol2:
-            status_filter = st.selectbox(
-                "Filter Status", ["All", "Available", "Under Construction", "Sold"]
-            )
+    # Filtering Logic
+    filtered_df = df.copy()
+    if status_filter != "All":
+        filtered_df = filtered_df[filtered_df["status"] == status_filter]
+    
+    if search_query.strip():
+        q = search_query.lower()
+        filtered_df = filtered_df[
+            filtered_df["name"].str.lower().str.contains(q) |
+            filtered_df["location"].str.lower().str.contains(q) |
+            filtered_df["purchase_date"].str.contains(q)
+        ]
 
-        with fcol3:
-            sort_order = st.selectbox(
-                "Sort By", ["Newest First", "Oldest First", "Highest Profit", "Highest Investment"]
-            )
+    st.markdown(f"Showing **{len(filtered_df)}** of **{len(df)}** properties")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-        # Apply Filters
-        filtered_df = df.copy()
+    # Render Cards Grid
+    is_admin = st.session_state.get("role") == "Admin"
+    
+    for _, prop in filtered_df.iterrows():
+        p_id = prop["id"]
+        with st.expander(f"🏠 {prop['name']} - {prop['location']} ({prop['status']})"):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.write(f"**Buying Price:** {format_pkr(prop['buying_price'])}")
+                st.write(f"**Construction Cost:** {format_pkr(prop['construction_cost'])}")
+                st.write(f"**Total Investment:** {format_pkr(prop['investment'])}")
+                st.write(f"**Size:** {prop['property_size']}")
+                st.write(f"**Purchase Date:** {prop['purchase_date']}")
+            with c2:
+                st.write(f"**Status:** {prop['status']}")
+                if prop['status'] == "Under Construction":
+                    st.write(f"**Expected Completion:** {prop['expected_completion_date']}")
+                elif prop['status'] == "Sold":
+                    st.write(f"**Sold Date:** {prop['sold_date']}")
+                    st.write(f"**Selling Price:** {format_pkr(prop['selling_price'])}")
+                    st.write(f"**Realized Profit:** {format_pkr(prop['profit'])}")
+                    st.write(f"**Dealer Commission:** {format_pkr(prop['dealer_commission'])}")
+                    st.write(f"**Jaffar Share:** {format_pkr(prop['jaffar_share'])}")
+                    st.write(f"**Tehseen Share:** {format_pkr(prop['tehseen_share'])}")
+                st.write(f"**Notes:** {prop['notes'] or 'N/A'}")
 
-        if search_query:
-            filtered_df = filtered_df[
-                filtered_df["property_name"].str.contains(search_query, case=False, na=False)
-                | filtered_df["location"].str.contains(search_query, case=False, na=False)
-            ]
+            # Admin Operations
+            if is_admin:
+                st.markdown("---")
+                col_e, col_d = st.columns([1, 1])
+                
+                # Edit Dialog Component
+                with col_e:
+                    if st.button(f"✏️ Edit Record", key=f"edit_btn_{p_id}"):
+                        st.session_state[f"editing_{p_id}"] = not st.session_state.get(f"editing_{p_id}", False)
+                
+                with col_d:
+                    if st.button(f"🗑️ Delete Record", key=f"del_btn_{p_id}"):
+                        st.session_state[f"confirm_delete_{p_id}"] = True
 
-        if status_filter != "All":
-            filtered_df = filtered_df[filtered_df["status"] == status_filter]
-
-        if sort_order == "Newest First":
-            filtered_df = filtered_df.sort_values(by="id", ascending=False)
-        elif sort_order == "Oldest First":
-            filtered_df = filtered_df.sort_values(by="id", ascending=True)
-        elif sort_order == "Highest Profit":
-            filtered_df = filtered_df.sort_values(by="profit", ascending=False)
-        elif sort_order == "Highest Investment":
-            filtered_df = filtered_df.sort_values(by="total_investment", ascending=False)
-
-        st.markdown(f"**Showing {len(filtered_df)} properties**")
-        st.markdown("---")
-
-        # Edit Dialog Modal Handler using Streamlit session state
-        if "editing_id" not in st.session_state:
-            st.session_state.editing_id = None
-
-        if st.session_state.editing_id is not None:
-            edit_item = fetch_property_by_id(st.session_state.editing_id)
-            if edit_item:
-                st.subheader(f"✏️ Editing Property: {edit_item['property_name']}")
-                with st.form("edit_property_form"):
-                    ec1, ec2 = st.columns(2)
-                    with ec1:
-                        e_date = st.date_input(
-                            "Date",
-                            value=datetime.strptime(edit_item["date_added"], "%Y-%m-%d").date(),
-                        )
-                        e_name = st.text_input("Property Name", value=edit_item["property_name"])
-                        e_location = st.text_input("Location", value=edit_item["location"])
-                        e_status = st.selectbox(
-                            "Status",
-                            ["Available", "Under Construction", "Sold"],
-                            index=["Available", "Under Construction", "Sold"].index(
-                                edit_item["status"]
-                            ),
-                        )
-                    with ec2:
-                        e_buying = st.number_input(
-                            "Buying Price ($)", value=float(edit_item["buying_price"]), step=1000.0
-                        )
-                        e_construction = st.number_input(
-                            "Construction Cost ($)",
-                            value=float(edit_item["construction_cost"]),
-                            step=500.0,
-                        )
-                        e_selling = st.number_input(
-                            "Selling Price ($)", value=float(edit_item["selling_price"]), step=1000.0
-                        )
-
-                    e_notes = st.text_area("Notes", value=edit_item["notes"] or "")
-
-                    e_metrics = calculate_investment_metrics(e_buying, e_construction, e_selling)
-
-                    st.info(
-                        f"Updated Investment: {format_currency(e_metrics['total_investment'])} | "
-                        f"Updated Profit: {format_currency(e_metrics['profit'])}"
-                    )
-
-                    btn_c1, btn_c2 = st.columns(2)
-                    with btn_c1:
-                        update_btn = st.form_submit_button("✅ Update Property", use_container_width=True)
-                    with btn_c2:
-                        cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
-
-                    if update_btn:
-                        if not e_name.strip() or not e_location.strip():
-                            st.error("Property name and location cannot be empty.")
-                        else:
-                            updated_payload = {
-                                "date_added": e_date.strftime("%Y-%m-%d"),
-                                "property_name": e_name.strip(),
-                                "location": e_location.strip(),
-                                "buying_price": e_buying,
-                                "construction_cost": e_construction,
-                                "selling_price": e_selling,
-                                "total_investment": e_metrics["total_investment"],
-                                "profit": e_metrics["profit"],
-                                "dealer_profit": e_metrics["dealer_profit"],
-                                "jaffar_profit": e_metrics["jaffar_profit"],
-                                "tehseen_profit": e_metrics["tehseen_profit"],
-                                "status": e_status,
-                                "notes": e_notes.strip(),
-                            }
-                            update_property(st.session_state.editing_id, updated_payload)
-                            st.session_state.editing_id = None
-                            st.success("Property updated successfully!")
-                            st.rerun()
-
-                    if cancel_btn:
-                        st.session_state.editing_id = None
+                # Delete Confirmation Overlay
+                if st.session_state.get(f"confirm_delete_{p_id}", False):
+                    st.warning(f"Are you sure you want to permanently delete '{prop['name']}'?")
+                    col_del_yes, col_del_no = st.columns(2)
+                    if col_del_yes.button("Yes, Delete", key=f"yes_del_{p_id}"):
+                        conn = get_db_connection()
+                        conn.execute("DELETE FROM properties WHERE id = ?", (p_id,))
+                        conn.commit()
+                        conn.close()
+                        st.session_state[f"confirm_delete_{p_id}"] = False
+                        st.success("Property deleted successfully!")
+                        st.rerun()
+                    if col_del_no.button("Cancel", key=f"no_del_{p_id}"):
+                        st.session_state[f"confirm_delete_{p_id}"] = False
                         st.rerun()
 
-                st.markdown("---")
+                # Inline Edit Form
+                if st.session_state.get(f"editing_{p_id}", False):
+                    st.markdown("#### Edit Property Details")
+                    with st.form(key=f"edit_form_{p_id}"):
+                        e_name = st.text_input("Property Name", value=prop["name"])
+                        e_loc = st.text_input("Location", value=prop["location"])
+                        e_buy = st.number_input("Buying Price", min_value=0.0, value=float(prop["buying_price"]))
+                        e_const = st.number_input("Construction Cost", min_value=0.0, value=float(prop["construction_cost"]))
+                        e_size = st.text_input("Property Size", value=prop["property_size"])
+                        e_status = st.selectbox("Status", ["Available", "Under Construction", "Sold"], 
+                                                index=["Available", "Under Construction", "Sold"].index(prop["status"]))
+                        
+                        e_sell = st.number_input("Selling Price", min_value=0.0, value=float(prop["selling_price"]))
+                        e_notes = st.text_area("Notes", value=prop["notes"] or "")
 
-        # Cards Rendering
-        for idx, row in filtered_df.iterrows():
-            badge_class = "badge-available"
-            if row["status"] == "Under Construction":
-                badge_class = "badge-construction"
-            elif row["status"] == "Sold":
-                badge_class = "badge-sold"
-
-            profit_color = "color: #10b981;" if row["profit"] >= 0 else "color: #ef4444;"
-
-            with st.container():
-                c1, c2, c3 = st.columns([3, 2, 2])
-
-                with c1:
-                    st.markdown(f"### {row['property_name']}")
-                    st.markdown(f"📍 **Location:** {row['location']} | 📅 **Date:** {row['date_added']}")
-                    st.markdown(
-                        f'<span class="status-badge {badge_class}">{row["status"]}</span>',
-                        unsafe_allow_html=True,
-                    )
-
-                with c2:
-                    st.write(f"**Investment:** {format_currency(row['total_investment'])}")
-                    st.write(f"**Selling Price:** {format_currency(row['selling_price'])}")
-                    st.markdown(
-                        f"**Profit:** <span style='{profit_color} font-weight: bold;'>{format_currency(row['profit'])}</span>",
-                        unsafe_allow_html=True,
-                    )
-
-                with c3:
-                    btn_view, btn_edit, btn_del = st.columns(3)
-
-                    with btn_view:
-                        with st.popover("👁️ View"):
-                            st.markdown(f"#### {row['property_name']} Details")
-                            st.write(f"**Buying Price:** {format_currency(row['buying_price'])}")
-                            st.write(f"**Construction Cost:** {format_currency(row['construction_cost'])}")
-                            st.write(f"**Total Investment:** {format_currency(row['total_investment'])}")
-                            st.write(f"**Selling Price:** {format_currency(row['selling_price'])}")
-                            st.markdown("---")
-                            st.write(f"**Dealer Profit (25%):** {format_currency(row['dealer_profit'])}")
-                            st.write(f"**Jaffar Profit:** {format_currency(row['jaffar_profit'])}")
-                            st.write(f"**Tehseen Profit:** {format_currency(row['tehseen_profit'])}")
-                            st.markdown("---")
-                            st.write(f"**Notes:** {row['notes'] or 'N/A'}")
-
-                    with btn_edit:
-                        if st.button("✏️ Edit", key=f"edit_{row['id']}"):
-                            st.session_state.editing_id = row["id"]
+                        save_btn = st.form_submit_button("Update Property")
+                        if save_btn:
+                            conn = get_db_connection()
+                            conn.execute('''
+                                UPDATE properties SET
+                                    name = ?, location = ?, buying_price = ?, construction_cost = ?,
+                                    property_size = ?, status = ?, selling_price = ?, notes = ?
+                                WHERE id = ?
+                            ''', (e_name, e_loc, e_buy, e_const, e_size, e_status, e_sell if e_status=="Sold" else 0.0, e_notes, p_id))
+                            conn.commit()
+                            conn.close()
+                            st.session_state[f"editing_{p_id}"] = False
+                            st.success("Property details updated!")
                             st.rerun()
 
-                    with btn_del:
-                        with st.popover("🗑️ Delete"):
-                            st.warning("Confirm deletion?")
-                            if st.button("Yes, Delete", key=f"confirm_del_{row['id']}"):
-                                delete_property_by_id(row["id"])
-                                st.success("Deleted!")
-                                st.rerun()
 
-                st.markdown("---")
-
-
-# ==========================================
-# PAGE 4: REPORTS
-# ==========================================
-elif menu_choice == "Reports":
-    st.title("📋 Reports & Data Exports")
-    st.markdown("Generate comprehensive financial tables and export records.")
-
-    df = fetch_all_properties()
-
+# ------------------------------------------
+# 5. REPORTS PAGE
+# ------------------------------------------
+def render_reports(metrics):
+    """Detailed audit reports table with search, sorting, and export capabilities."""
+    st.title("📑 Financial & Ledger Reports")
+    
+    df = metrics["properties_df"]
+    
     if df.empty:
-        st.info("No records available to export.")
-    else:
-        # Download Action Bar
-        col_csv, col_excel = st.columns(2)
+        st.info("No transaction data available for reporting.")
+        return
 
-        # CSV Buffer
-        csv_data = df.to_csv(index=False).encode("utf-8")
-        col_csv.download_button(
-            label="📥 Download CSV Report",
+    # Tabs for granular reporting
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "All Properties Report", "Profit & Loss Ledger", "Dealer Commission Ledger",
+        "Jaffar Wallet Ledger", "Tehseen Wallet Ledger"
+    ])
+
+    # Table Display Formatter
+    def format_df_display(data_frame):
+        d = data_frame.copy()
+        num_cols = ["buying_price", "construction_cost", "selling_price", "investment", "profit", "loss", "dealer_commission", "jaffar_share", "tehseen_share"]
+        for col in num_cols:
+            if col in d.columns:
+                d[col] = d[col].apply(format_pkr)
+        return d
+
+    with tab1:
+        st.subheader("Comprehensive Portfolio Master Table")
+        st.dataframe(format_df_display(df), use_container_width=True)
+
+    with tab2:
+        st.subheader("Profit & Loss Ledger (Sold Properties)")
+        sold_df = df[df["status"] == "Sold"]
+        if not sold_df.empty:
+            st.dataframe(format_df_display(sold_df[["name", "location", "selling_price", "investment", "profit", "loss"]]), use_container_width=True)
+        else:
+            st.info("No sold records available.")
+
+    with tab3:
+        st.subheader("Dealer Commission Earnings")
+        sold_df = df[df["status"] == "Sold"]
+        if not sold_df.empty:
+            st.dataframe(format_df_display(sold_df[["name", "location", "selling_price", "profit", "dealer_commission"]]), use_container_width=True)
+            st.markdown(f"**Total Dealer Commission Paid:** `{format_pkr(metrics['dealer_earnings'])}`")
+        else:
+            st.info("No commission payouts recorded.")
+
+    with tab4:
+        st.subheader("Jaffar Profit Share Ledger")
+        sold_df = df[df["status"] == "Sold"]
+        if not sold_df.empty:
+            st.dataframe(format_df_display(sold_df[["name", "location", "profit", "jaffar_share"]]), use_container_width=True)
+            st.markdown(f"**Total Profit Earned by Jaffar:** `{format_pkr(metrics['jaffar_profit'])}`")
+        else:
+            st.info("No partner payouts recorded.")
+
+    with tab5:
+        st.subheader("Tehseen Profit Share Ledger")
+        sold_df = df[df["status"] == "Sold"]
+        if not sold_df.empty:
+            st.dataframe(format_df_display(sold_df[["name", "location", "profit", "tehseen_share"]]), use_container_width=True)
+            st.markdown(f"**Total Profit Earned by Tehseen:** `{format_pkr(metrics['tehseen_profit'])}`")
+        else:
+            st.info("No partner payouts recorded.")
+
+    st.markdown("<hr class='hr-divider'>", unsafe_allow_html=True)
+    st.subheader("📥 Export Financial Reports")
+
+    col_csv, col_excel, col_pdf = st.columns(3)
+    
+    # 1. CSV Export
+    with col_csv:
+        csv_data = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📄 Export to CSV",
             data=csv_data,
-            file_name=f"Property_Report_{date.today().strftime('%Y_%m_%d')}.csv",
+            file_name=f"portfolio_report_{date.today()}.csv",
             mime="text/csv",
-            use_container_width=True,
+            use_container_width=True
         )
 
-        # Excel Buffer
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Properties")
-        excel_data = excel_buffer.getvalue()
-
-        col_excel.download_button(
-            label="📊 Download Excel Report",
+    # 2. Excel Export
+    with col_excel:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Portfolio Summary')
+        excel_data = output.getvalue()
+        st.download_button(
+            label="📊 Export to Excel",
             data=excel_data,
-            file_name=f"Property_Report_{date.today().strftime('%Y_%m_%d')}.xlsx",
+            file_name=f"portfolio_report_{date.today()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            use_container_width=True
         )
 
-        st.markdown("---")
-
-        # Complete Data Table
-        st.subheader("📁 Complete Property Records")
-        st.dataframe(
-            df.style.format(
-                {
-                    "buying_price": "${:,.2f}",
-                    "construction_cost": "${:,.2f}",
-                    "selling_price": "${:,.2f}",
-                    "total_investment": "${:,.2f}",
-                    "profit": "${:,.2f}",
-                    "dealer_profit": "${:,.2f}",
-                    "jaffar_profit": "${:,.2f}",
-                    "tehseen_profit": "${:,.2f}",
-                }
-            ),
-            use_container_width=True,
+    # 3. PDF Export
+    with col_pdf:
+        pdf_bytes = generate_pdf_report(metrics)
+        st.download_button(
+            label="📕 Export PDF Statement",
+            data=bytes(pdf_bytes),
+            file_name=f"executive_statement_{date.today()}.pdf",
+            mime="application/pdf",
+            use_container_width=True
         )
 
-        st.markdown("---")
 
-        # Categorized Tabbed Tables
-        tab1, tab2, tab3 = st.tabs(["🟢 Profit Table", "🔴 Loss Table", "💼 Investment Summary"])
+# ------------------------------------------
+# 6. BUSINESS SETTINGS PAGE
+# ------------------------------------------
+def render_settings():
+    """Manage System Settings & Baseline Configuration."""
+    st.title("⚙️ Business Settings")
+    
+    if st.session_state.get("role") != "Admin":
+        st.error("Access Restricted: Only Admins can modify system settings.")
+        return
 
-        with tab1:
-            st.subheader("Profitable Properties")
-            profit_df = df[df["profit"] >= 0]
-            st.dataframe(
-                profit_df[
-                    ["property_name", "location", "total_investment", "selling_price", "profit", "dealer_profit", "jaffar_profit", "tehseen_profit"]
-                ].style.format("${:,.2f}", subset=["total_investment", "selling_price", "profit", "dealer_profit", "jaffar_profit", "tehseen_profit"]),
-                use_container_width=True,
-            )
+    settings = get_settings()
+    
+    with st.form("settings_update_form"):
+        b_name = st.text_input("Business Name", value=settings["business_name"])
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            init_cash = st.number_input("Initial Business Cash (PKR)", value=float(settings["initial_business_cash"]), step=100000.0)
+            jaffar_nw = st.number_input("Jaffar Initial Net Worth (PKR)", value=float(settings["jaffar_initial_net_worth"]), step=100000.0)
+        with c2:
+            init_nw = st.number_input("Initial Business Net Worth (PKR)", value=float(settings["initial_business_net_worth"]), step=100000.0)
+            tehseen_nw = st.number_input("Tehseen Initial Net Worth (PKR)", value=float(settings["tehseen_initial_net_worth"]), step=100000.0)
 
-        with tab2:
-            st.subheader("Loss-Making Properties")
-            loss_df = df[df["profit"] < 0]
-            if loss_df.empty:
-                st.success("🎉 No loss-making properties in the portfolio!")
-            else:
-                st.dataframe(
-                    loss_df[
-                        ["property_name", "location", "buying_price", "construction_cost", "total_investment", "selling_price", "profit"]
-                    ].style.format("${:,.2f}", subset=["buying_price", "construction_cost", "total_investment", "selling_price", "profit"]),
-                    use_container_width=True,
-                )
+        comm = st.number_input("Default Dealer Commission (%)", min_value=0.0, max_value=100.0, value=float(settings["dealer_default_commission"]), step=1.0)
 
-        with tab3:
-            st.subheader("Investment Breakdown")
-            st.dataframe(
-                df[
-                    ["property_name", "status", "buying_price", "construction_cost", "total_investment"]
-                ].style.format("${:,.2f}", subset=["buying_price", "construction_cost", "total_investment"]),
-                use_container_width=True,
-            )
-
-
-# ==========================================
-# PAGE 5: SETTINGS
-# ==========================================
-elif menu_choice == "Settings":
-    st.title("⚙️ System Settings & Maintenance")
-    st.markdown("Manage database connections and partner configurations.")
-
-    st.subheader("📊 System Status")
-    st.success("SQLite Database Connection: Active & Healthy")
-    st.info(f"Database Path: `{DB_NAME}`")
-
-    st.markdown("---")
-    st.subheader("👥 Partner Profit Shares Configuration")
-    st.write("- **Dealer Share:** 25%")
-    st.write("- **Jaffar Share:** 37.5% (50% of remaining)")
-    st.write("- **Tehseen Share:** 37.5% (50% of remaining)")
-
-    st.markdown("---")
-    st.subheader("⚠️ Database Operations")
-
-    with st.expander("Danger Zone"):
-        st.warning("Clearing database records cannot be undone.")
-        if st.button("Delete All Property Records"):
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM properties")
-                conn.commit()
-            st.success("All records have been cleared.")
+        submit = st.form_submit_button("Update Settings", use_container_width=True)
+        if submit:
+            update_settings(b_name, init_cash, init_nw, jaffar_nw, tehseen_nw, comm)
+            st.success("Business settings updated successfully!")
             st.rerun()
+
+
+# ==========================================
+# MAIN APPLICATION CONTROLLER
+# ==========================================
+def main():
+    """Application flow router and state initialization."""
+    # Session state initialization
+    if "authenticated" not in st.session_state:
+        st.session_state["authenticated"] = False
+
+    # 1. Login Enforcement
+    if not st.session_state["authenticated"]:
+        login_page()
+        return
+
+    # 2. Settings Check (First time system launch)
+    settings = get_settings()
+    if not settings:
+        initial_setup_page()
+        return
+
+    # 3. Calculate Portfolio Metrics
+    metrics = calculate_portfolio_metrics()
+
+    # 4. Sidebar Navigation
+    st.sidebar.title(f"🏢 {settings['business_name']}")
+    st.sidebar.caption(f"Logged in as: **{st.session_state['username']}** ({st.session_state['role']})")
+    st.sidebar.markdown("---")
+
+    menu = st.sidebar.radio(
+        "Navigation Menu",
+        ["Dashboard", "Portfolio", "Add Property", "Manage Properties", "Reports", "Business Settings"]
+    )
+
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔒 Logout", use_container_width=True):
+        st.session_state["authenticated"] = False
+        st.session_state["username"] = None
+        st.session_state["role"] = None
+        st.rerun()
+
+    # 5. Route Page Selection
+    if menu == "Dashboard":
+        render_dashboard(metrics)
+    elif menu == "Portfolio":
+        render_portfolio(metrics)
+    elif menu == "Add Property":
+        render_add_property()
+    elif menu == "Manage Properties":
+        render_manage_properties(metrics)
+    elif menu == "Reports":
+        render_reports(metrics)
+    elif menu == "Business Settings":
+        render_settings()
+
+
+if __name__ == "__main__":
+    main()
