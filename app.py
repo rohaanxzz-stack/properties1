@@ -81,7 +81,7 @@ st.markdown(
     .badge-sold { background-color: #dcfce7; color: #15803d; }
     </style>
 """,
-    unsafe_allow_html=text,
+    unsafe_allow_html=True,
 )
 
 # ==========================================
@@ -275,7 +275,6 @@ st.sidebar.markdown("---")
 menu_choice = st.sidebar.radio(
     "Navigation Menu",
     ["Dashboard", "Add Property", "Manage Properties", "Reports", "Settings"],
-    icons=["speedometer2", "plus-circle", "building", "file-earmark-bar-graph", "gear"],
 )
 
 st.sidebar.markdown("---")
