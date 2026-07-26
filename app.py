@@ -121,6 +121,21 @@ def init_db():
         )
     """)
     
+    # Safe schema migration for business_settings table
+    cursor.execute("PRAGMA table_info(business_settings)")
+    existing_cols = [row[1] for row in cursor.fetchall()]
+    
+    required_cols = {
+        "jaffar_initial_net_worth": "REAL DEFAULT 0.0",
+        "tehseen_initial_net_worth": "REAL DEFAULT 0.0",
+        "dealer_commission_pct": "REAL DEFAULT 25.0",
+        "logo_data": "BLOB"
+    }
+    
+    for col_name, col_type in required_cols.items():
+        if col_name not in existing_cols:
+            cursor.execute(f"ALTER TABLE business_settings ADD COLUMN {col_name} {col_type}")
+
     # Properties Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS properties (
@@ -385,7 +400,6 @@ def generate_pdf_report(df, title_text):
     elements.append(Spacer(1, 15))
     
     if not df.empty:
-        # Format table data safely
         data = [df.columns.tolist()]
         for row in df.values:
             formatted_row = []
@@ -536,7 +550,6 @@ if choice == "🏠 Dashboard":
             total_active_inv = fin['total_active_investment']
             portfolio_share = (row['our_investment'] / total_active_inv * 100) if total_active_inv > 0 else 0.0
             
-            # ROI calculation based on Our Investment vs Our Share of Current Value
             our_curr_val = row['current_est_value'] * (row['ownership_pct'] / 100.0)
             roi_pct = ((our_curr_val - row['our_investment']) / row['our_investment'] * 100) if row['our_investment'] > 0 else 0.0
             
@@ -650,7 +663,6 @@ elif choice == "🏢 Manage Properties":
         filter_status = f_col3.selectbox("Filter Status", ["All", "Available", "Under Construction", "Sold"])
         filter_ownership = f_col4.selectbox("Filter Ownership", ["All"] + sorted(df_props['ownership_pct'].unique().tolist()))
         
-        # Apply Filters
         filtered_df = df_props.copy()
         if search_query:
             filtered_df = filtered_df[
@@ -664,7 +676,6 @@ elif choice == "🏢 Manage Properties":
         if filter_ownership != "All":
             filtered_df = filtered_df[filtered_df['ownership_pct'] == float(filter_ownership)]
 
-        # PREPARE DISPLAY TABLE
         display_rows = []
         comm_pct = settings['dealer_commission_pct'] / 100.0
         
@@ -707,7 +718,6 @@ elif choice == "🏢 Manage Properties":
         st.dataframe(pd.DataFrame(display_rows), use_container_width=True)
         st.markdown("---")
 
-        # ACTION BUTTONS & EDIT/DELETE INLINE MODAL
         st.subheader("⚙️ Edit Property Record")
         prop_list = {f"{r['name']} (ID: {r['id']})": r['id'] for _, r in filtered_df.iterrows()}
         
@@ -733,7 +743,6 @@ elif choice == "🏢 Manage Properties":
                     
                     e_status = st.selectbox("Status", ["Available", "Under Construction", "Sold"], index=["Available", "Under Construction", "Sold"].index(selected_row['status']))
                     
-                    # Selling specific inputs
                     st.markdown("---")
                     st.markdown("**Sale Settlement Details (If Sold):**")
                     e_actual_selling_price = st.number_input("Actual Selling Price (PKR)", value=float(selected_row['actual_selling_price']), step=100000.0)
@@ -745,7 +754,6 @@ elif choice == "🏢 Manage Properties":
                     e_total_cost = e_buying_price + e_construction
                     e_our_inv = e_total_cost * (e_ownership / 100.0)
 
-                    # Sale warnings
                     if e_status == 'Sold' and e_actual_selling_price > 0:
                         our_sell_amt = e_actual_selling_price * (e_ownership / 100.0)
                         if our_sell_amt < e_our_inv:
@@ -787,7 +795,6 @@ elif choice == "📊 Portfolio":
     if df_props.empty:
         st.info("No properties found to visualize.")
     else:
-        # VISUALIZATION ROW 1
         v_col1, v_col2 = st.columns(2)
         
         with v_col1:
@@ -812,7 +819,6 @@ elif choice == "📊 Portfolio":
 
         st.markdown("---")
         
-        # VISUALIZATION ROW 2
         v_col3, v_col4 = st.columns(2)
         
         with v_col3:
@@ -847,7 +853,6 @@ elif choice == "📑 Reports":
     df_props = get_properties()
     comm_pct = settings['dealer_commission_pct'] / 100.0
     
-    # Process Detailed Breakdown Dataframe
     processed_records = []
     for _, r in df_props.iterrows():
         ownership_fraction = r['ownership_pct'] / 100.0
