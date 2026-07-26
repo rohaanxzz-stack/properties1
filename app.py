@@ -470,6 +470,38 @@ def inject_css(theme: str):
             color: {input_text} !important;
         }}
 
+        /* --- Date picker calendar popover (separate BaseWeb component) --- */
+        div[data-baseweb="popover"] div[data-baseweb="calendar"],
+        div[data-baseweb="calendar"] > div,
+        div[data-baseweb="datepicker"] {{
+            background-color: {input_bg} !important;
+        }}
+        div[data-baseweb="calendar"] * {{
+            color: {input_text} !important;
+        }}
+        div[data-baseweb="calendar"] div[role="gridcell"] div,
+        div[data-baseweb="calendar"] button {{
+            background-color: transparent !important;
+            color: {input_text} !important;
+        }}
+        div[data-baseweb="calendar"] div[role="gridcell"][aria-disabled="true"] div {{
+            color: {text_secondary} !important;
+            opacity: 0.5 !important;
+        }}
+        div[data-baseweb="calendar"] div[aria-selected="true"] div {{
+            background-color: {PRIMARY} !important;
+            color: #ffffff !important;
+            border-radius: 50% !important;
+        }}
+        div[data-baseweb="calendar"] div[role="gridcell"]:hover div {{
+            background-color: {hover_bg} !important;
+        }}
+        /* month/year header selects inside the calendar */
+        div[data-baseweb="calendar"] div[data-baseweb="select"] > div {{
+            background-color: {input_bg} !important;
+            color: {input_text} !important;
+        }}
+
         /* --- Multiselect selected tags --- */
         .stMultiSelect span[data-baseweb="tag"] {{
             background-color: {PRIMARY} !important;
