@@ -1,5 +1,5 @@
-streamlit>=1.30.0
-pandas>=2.0.0
-plotly>=5.18.0
-fpdf2>=2.7.8
-openpyxl>=3.1.2
+streamlit
+pandas
+plotly
+openpyxl
+reportlab
