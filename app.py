@@ -376,32 +376,45 @@ def format_pct(value) -> str:
 # =========================================================================
 
 def inject_css(theme: str):
+    """
+    Every rule below sets BOTH background-color and color together for any
+    element that has a background, so text can never inherit a color from
+    one theme while its box keeps the background of the other. All rules
+    use !important because Streamlit's built-in BaseWeb widgets ship with
+    their own inline-specificity styles that otherwise win.
+    """
     if theme == "Dark":
         bg = "#0f1117"
         card_bg = "#181b25"
-        card_border = "#262a38"
+        card_border = "#2b2f3d"
         text_primary = "#f1f5f9"
-        text_secondary = "#94a3b8"
+        text_secondary = "#a3adc2"
         sidebar_bg = "#12141c"
+        input_bg = "#1f2330"
+        input_text = "#f1f5f9"
+        hover_bg = "#262b3a"
     else:
         bg = "#f5f7fb"
         card_bg = "#ffffff"
-        card_border = "#e7eaf3"
+        card_border = "#e2e6f0"
         text_primary = "#0f172a"
-        text_secondary = "#64748b"
+        text_secondary = "#475569"
         sidebar_bg = "#ffffff"
-
-    input_bg = "#1f2330" if theme == "Dark" else "#ffffff"
-    input_text = "#f1f5f9" if theme == "Dark" else "#0f172a"
+        input_bg = "#ffffff"
+        input_text = "#0f172a"
+        hover_bg = "#f1f4fb"
 
     st.markdown(f"""
     <style>
-        .stApp {{
-            background-color: {bg};
-            color: {text_primary};
+        html, body, .stApp, [data-testid="stAppViewContainer"], .main {{
+            background-color: {bg} !important;
+            color: {text_primary} !important;
         }}
-        [data-testid="stSidebar"] {{
-            background-color: {sidebar_bg};
+        [data-testid="stHeader"] {{
+            background-color: {bg} !important;
+        }}
+        [data-testid="stSidebar"], [data-testid="stSidebar"] > div {{
+            background-color: {sidebar_bg} !important;
             border-right: 1px solid {card_border};
         }}
         [data-testid="stSidebar"] * {{
@@ -411,60 +424,64 @@ def inject_css(theme: str):
             padding-top: 1.6rem;
             padding-bottom: 3rem;
         }}
-        h1, h2, h3, h4, h5, h6, p, span, label, div, li, a {{
+        h1, h2, h3, h4, h5, h6, p, span, label, div, li, a,
+        .stMarkdown, [data-testid="stMarkdownContainer"] {{
             color: {text_primary};
         }}
 
-        /* --- Form widgets: text inputs, number inputs, textareas --- */
+        /* --- Text / number / date / textarea inputs --- */
         .stTextInput input, .stNumberInput input, .stTextArea textarea,
         .stDateInput input {{
             background-color: {input_bg} !important;
             color: {input_text} !important;
             border: 1px solid {card_border} !important;
+            -webkit-text-fill-color: {input_text} !important;
         }}
         .stTextInput input::placeholder, .stTextArea textarea::placeholder {{
             color: {text_secondary} !important;
-            opacity: 1;
+            opacity: 1 !important;
         }}
 
-        /* --- Selectbox / Multiselect (closed state) --- */
+        /* --- Selectbox / Multiselect closed box --- */
         .stSelectbox div[data-baseweb="select"] > div,
         .stMultiSelect div[data-baseweb="select"] > div {{
             background-color: {input_bg} !important;
             color: {input_text} !important;
             border-color: {card_border} !important;
         }}
-        .stSelectbox div[data-baseweb="select"] span,
-        .stMultiSelect div[data-baseweb="select"] span {{
+        .stSelectbox div[data-baseweb="select"] *,
+        .stMultiSelect div[data-baseweb="select"] * {{
             color: {input_text} !important;
+            fill: {input_text} !important;
         }}
 
-        /* --- Dropdown popover / option list (rendered in a portal) --- */
-        div[data-baseweb="popover"] {{
+        /* --- Dropdown option list (BaseWeb renders it in a portal at body level) --- */
+        div[data-baseweb="popover"] div[data-baseweb="menu"],
+        div[data-baseweb="popover"] ul[role="listbox"] {{
             background-color: {input_bg} !important;
         }}
-        div[data-baseweb="popover"] li,
-        div[data-baseweb="popover"] div,
-        ul[role="listbox"] li {{
+        div[data-baseweb="popover"] li[role="option"] {{
             background-color: {input_bg} !important;
             color: {input_text} !important;
         }}
-        ul[role="listbox"] li:hover {{
-            background-color: {PRIMARY} !important;
-            color: #ffffff !important;
+        div[data-baseweb="popover"] li[role="option"]:hover,
+        div[data-baseweb="popover"] li[aria-selected="true"] {{
+            background-color: {hover_bg} !important;
+            color: {input_text} !important;
         }}
 
         /* --- Multiselect selected tags --- */
         .stMultiSelect span[data-baseweb="tag"] {{
             background-color: {PRIMARY} !important;
+        }}
+        .stMultiSelect span[data-baseweb="tag"] * {{
             color: #ffffff !important;
+            fill: #ffffff !important;
         }}
 
-        /* --- Radio / checkbox labels --- */
-        .stRadio label, .stCheckbox label {{
-            color: {text_primary} !important;
-        }}
-        .stRadio label p, .stCheckbox label p {{
+        /* --- Radio / checkbox --- */
+        .stRadio label p, .stCheckbox label p,
+        .stRadio label span, .stCheckbox label span {{
             color: {text_primary} !important;
         }}
 
@@ -472,38 +489,82 @@ def inject_css(theme: str):
         [data-testid="stDataFrame"] {{
             background-color: {card_bg} !important;
         }}
-        [data-testid="stDataFrame"] * {{
+        [data-testid="stDataFrame"] div, [data-testid="stDataFrame"] span {{
+            background-color: {card_bg} !important;
             color: {input_text} !important;
         }}
 
         /* --- Metric widget --- */
-        [data-testid="stMetric"] label, [data-testid="stMetric"] div {{
+        [data-testid="stMetric"] {{
+            background-color: transparent !important;
+        }}
+        [data-testid="stMetricLabel"] * , [data-testid="stMetricValue"] * {{
             color: {text_primary} !important;
         }}
 
         /* --- Tabs --- */
+        .stTabs [data-baseweb="tab"] {{
+            background-color: {card_bg} !important;
+            border: 1px solid {card_border} !important;
+            border-radius: 10px 10px 0 0;
+            padding: 8px 16px;
+        }}
         .stTabs [data-baseweb="tab"] p {{
             color: {text_primary} !important;
         }}
+        .stTabs [aria-selected="true"] {{
+            background-color: {hover_bg} !important;
+        }}
+        .stTabs [data-baseweb="tab-list"] {{
+            gap: 6px;
+            background-color: transparent !important;
+        }}
+        .stTabs [data-baseweb="tab-panel"] {{
+            background-color: transparent !important;
+        }}
 
         /* --- Expander --- */
-        .streamlit-expanderHeader, [data-testid="stExpander"] summary {{
+        [data-testid="stExpander"] {{
+            background-color: {card_bg} !important;
+            border: 1px solid {card_border} !important;
+            border-radius: 12px;
+        }}
+        [data-testid="stExpander"] summary, [data-testid="stExpander"] summary * {{
             background-color: {card_bg} !important;
             color: {text_primary} !important;
         }}
-        [data-testid="stExpander"] * {{
+        [data-testid="stExpander"] [data-testid="stExpanderDetails"] {{
+            background-color: {card_bg} !important;
             color: {text_primary} !important;
         }}
 
-        /* --- Alerts (info/success/warning/error) keep their own readable palette --- */
-        [data-testid="stAlert"] p, [data-testid="stAlert"] div {{
-            color: inherit !important;
+        /* --- Alerts keep their own built-in readable palette; only fix container bg --- */
+        [data-testid="stAlert"] {{
+            background-color: {card_bg} !important;
         }}
 
-        /* --- File download buttons / general buttons --- */
+        /* --- Buttons --- */
         .stButton button, .stDownloadButton button, .stFormSubmitButton button {{
-            color: {text_primary if theme == "Dark" else "#0f172a"};
+            background-color: {card_bg} !important;
+            color: {text_primary} !important;
+            border: 1px solid {card_border} !important;
         }}
+        .stButton button[kind="primary"], .stDownloadButton button[kind="primary"],
+        .stFormSubmitButton button[kind="primary"] {{
+            background-color: {PRIMARY} !important;
+            border-color: {PRIMARY} !important;
+        }}
+        .stButton button[kind="primary"] *, .stDownloadButton button[kind="primary"] *,
+        .stFormSubmitButton button[kind="primary"] * {{
+            color: #ffffff !important;
+        }}
+
+        /* --- Forms container --- */
+        [data-testid="stForm"] {{
+            background-color: transparent !important;
+            border: none !important;
+        }}
+
         .app-header {{
             display: flex;
             justify-content: space-between;
